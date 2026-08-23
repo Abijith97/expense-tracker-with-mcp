@@ -1,10 +1,14 @@
 import json
 from datetime import datetime
-from ollama import chat
+from ollama import Client
+
+client = Client(
+    host="http://172.24.80.1:11434"
+)
 
 today = datetime.now().strftime("%Y-%m-%d")
 
-message = chat(
+message = client.chat(
     model="qwen3:8b",
     messages=[
         {
