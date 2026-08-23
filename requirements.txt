@@ -1,0 +1,6 @@
+fastapi
+google-auth
+gspread
+ollama
+python-multipart
+uvicorn[standard]

@@ -12,8 +12,8 @@ WhatsApp
 → Twilio WhatsApp Sandbox
 → webhook
 → ngrok (Windows)
-→ FastAPI (WSL2, port 8000)
-→ Ollama on Windows (port 11434)
+→ FastAPI (Windows, port 8000)
+→ Ollama (Windows, port 11434)
 → Qwen3 8B
 → structured JSON
 → Python validation/processing
@@ -25,16 +25,14 @@ Environment:
 Windows:
 - Ollama + Qwen3 8B
 - ngrok
-
-WSL2:
 - FastAPI/Python application
 - Uvicorn on localhost:8000
 
-WSL2 reaches Windows Ollama at:
+The application connects to Ollama at:
 
-http://172.24.80.1:11434
+http://127.0.0.1:11434
 
-This was verified from WSL with:
+This can be verified with:
 
 curl http://172.24.80.1:11434
 
@@ -48,7 +46,7 @@ Completed.
 
 Twilio WhatsApp Sandbox receives WhatsApp messages and triggers the configured webhook via HTTP POST.
 
-FastAPI runs in WSL2:
+FastAPI runs on Windows:
 
 uvicorn main:app --reload
 
@@ -66,7 +64,7 @@ https://<ngrok-url>/webhook
 
 The ngrok URL changes when a new free session is started.
 
-Running ngrok directly inside WSL previously caused namespace errors, so the current setup is FastAPI in WSL2 and ngrok on Windows.
+The current setup runs FastAPI and ngrok directly on Windows.
 
 ## Phase 2 — LLM
 
@@ -76,13 +74,13 @@ Current LLM:
 
 Qwen3 8B via Ollama.
 
-Ollama runs on Windows. Python in WSL2 connects explicitly:
+Ollama and the Python application both run on Windows and connect explicitly:
 
 ```python
 from ollama import Client
 
 client = Client(
-    host="http://172.24.80.1:11434"
+    host="http://127.0.0.1:11434"
 )
 ```
 
@@ -326,7 +324,7 @@ A technically accurate description:
 - Built an event-driven expense tracking application using WhatsApp as the user interface and Twilio webhooks for real-time message processing.
 - Integrated a self-hosted Qwen3 8B LLM through Ollama to extract structured expense data from natural-language messages.
 - Developed a FastAPI backend to process and validate LLM-generated expense records and automatically persist them to Google Sheets using the Google Sheets API.
-- Configured a Windows/WSL2 development environment for local LLM inference while maintaining cloud-based WhatsApp and spreadsheet integrations.
+- Configured a Windows development environment for local LLM inference while maintaining cloud-based WhatsApp and spreadsheet integrations.
 
 ## Current Status
 
@@ -337,7 +335,7 @@ Completed:
 - ngrok tunnel
 - Ollama installation
 - Qwen3 8B installation
-- WSL2 → Windows Ollama networking
+- Windows-only Ollama networking
 - Local LLM extraction test
 - Google Sheets API
 - Service account authentication

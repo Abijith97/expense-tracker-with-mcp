@@ -1,6 +1,7 @@
 """WhatsApp webhook that extracts expenses with Ollama and stores them in Google Sheets."""
 
 import json
+import os
 from datetime import datetime
 from typing import Any
 
@@ -14,10 +15,10 @@ from ollama import Client
 app = FastAPI()
 
 # Connection details for the local Ollama instance and Google Sheets workbook.
-OLLAMA_HOST = "http://172.24.80.1:11434"
-OLLAMA_MODEL = "qwen3:8b"
-SPREADSHEET_NAME = "Expense_Tracker"
-SERVICE_ACCOUNT_FILE = "service-account.json"
+OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3:8b")
+SPREADSHEET_NAME = os.getenv("SPREADSHEET_NAME", "Expense_Tracker")
+SERVICE_ACCOUNT_FILE = os.getenv("SERVICE_ACCOUNT_FILE", "service-account.json")
 
 GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
