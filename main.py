@@ -1,83 +1,68 @@
-from fastapi import FastAPI, Request
-from ollama import Client
-import gspread
-from google.oauth2.service_account import Credentials
+"""WhatsApp webhook that extracts expenses with Ollama and stores them in Google Sheets."""
+
 import json
 from datetime import datetime
+from typing import Any
 
+import gspread
+from fastapi import FastAPI, Request
+from google.oauth2.service_account import Credentials
+from ollama import Client
+
+
+# The FastAPI application is imported by an ASGI server (for example, Uvicorn).
 app = FastAPI()
 
+# Connection details for the local Ollama instance and Google Sheets workbook.
+OLLAMA_HOST = "http://172.24.80.1:11434"
+OLLAMA_MODEL = "qwen3:8b"
+SPREADSHEET_NAME = "Expense_Tracker"
+SERVICE_ACCOUNT_FILE = "service-account.json"
 
-# =========================
-# Ollama
-# =========================
-
-ollama_client = Client(
-    host="http://172.24.80.1:11434"
-)
-
-
-# =========================
-# Google Sheets
-# =========================
-
-SCOPES = [
+GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive"
+    "https://www.googleapis.com/auth/drive",
 ]
 
-creds = Credentials.from_service_account_file(
-    "service-account.json",
-    scopes=SCOPES
+VALID_CATEGORIES = [
+    "Food",
+    "Transport",
+    "Groceries",
+    "Family",
+    "Gifts",
+    "Utilities",
+    "Clothing",
+    "Investments",
+    "Home & Kitchen",
+    "Family & Leisure",
+    "Family & Celebration",
+    "Snacks",
+    "Other",
+]
+
+
+# Set up the external clients once when the application starts.
+ollama_client = Client(host=OLLAMA_HOST)
+credentials = Credentials.from_service_account_file(
+    SERVICE_ACCOUNT_FILE,
+    scopes=GOOGLE_SCOPES,
 )
-
-google_client = gspread.authorize(creds)
-
-sheet = google_client.open("Expense_Tracker").sheet1
+google_client = gspread.authorize(credentials)
+sheet = google_client.open(SPREADSHEET_NAME).sheet1
 
 
-# =========================
-# WhatsApp Webhook
-# =========================
-
-@app.post("/webhook")
-async def whatsapp_webhook(request: Request):
-
-    data = await request.form()
-
-    user_message = data.get("Body")
-    sender = data.get("From")
-
-    print("\n===== NEW MESSAGE =====")
-    print("Sender:", sender)
-    print("Message:", user_message)
-
-
-    # =========================
-    # Send message to Qwen3
-    # =========================
-
+def build_extraction_prompt(user_message: str) -> str:
+    """Build the strict JSON-only prompt used to extract expenses from a message."""
     today = datetime.now().strftime("%Y-%m-%d")
+    categories = "\n".join(f"- {category}" for category in VALID_CATEGORIES)
 
-    prompt = f"""
+    return f"""
 You are an expense extraction system.
 
 Today's date is {today}.
 
 Valid categories:
-- Food
-- Transport
-- Groceries
-- Family
-- Gifts
-- Utilities
-- Clothing
-- Investments
-- Home & Kitchen
-- Family & Leisure
-- Family & Celebration
-- Snacks
-- Other
+{categories}
 
 Return ONLY valid JSON.
 
@@ -116,48 +101,55 @@ Message:
 {user_message}
 """
 
+
+def append_expenses(expenses: list[dict[str, Any]]) -> None:
+    """Append the extracted expense records to the first worksheet."""
+    for expense in expenses:
+        sheet.append_row(
+            [
+                expense["date"],
+                expense["category"],
+                expense["event"],
+                expense["price"],
+            ]
+        )
+        print(
+            f"Added: {expense['date']} | {expense['category']} | "
+            f"{expense['event']} | {expense['price']}"
+        )
+
+
+@app.post("/webhook")
+async def whatsapp_webhook(request: Request) -> str:
+    """Receive a WhatsApp message, extract expenses, and persist them."""
+    # Twilio sends WhatsApp webhook values as form data.
+    data = await request.form()
+    user_message = data.get("Body", "")
+    sender = data.get("From", "Unknown")
+
+    print("\n===== NEW MESSAGE =====")
+    print("Sender:", sender)
+    print("Message:", user_message)
+
+    # Ask Qwen to return one structured record per spending event.
     response = ollama_client.chat(
-        model="qwen3:8b",
-        messages=[
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ]
+        model=OLLAMA_MODEL,
+        messages=[{"role": "user", "content": build_extraction_prompt(user_message)}],
     )
-
-
-    # =========================
-    # Parse JSON
-    # =========================
-
     response_text = response.message.content
 
     print("\n===== QWEN RESPONSE =====")
     print(response_text)
 
-    expenses = json.loads(response_text)
-
-
-    # =========================
-    # Update Google Sheets
-    # =========================
-
-    for expense in expenses["expenses"]:
-
-        sheet.append_row([
-            expense["date"],
-            expense["category"],
-            expense["event"],
-            expense["price"]
-        ])
-
-        print(
-            f"Added: {expense['date']} | "
-            f"{expense['category']} | "
-            f"{expense['event']} | "
-            f"{expense['price']}"
-        )
-
+    # The model is instructed to return {"expenses": [...]} and nothing else.
+    extracted_data = json.loads(response_text)
+    append_expenses(extracted_data["expenses"])
 
     return "OK"
+
+
+if __name__ == "__main__":
+    # Running `python main.py` starts the development server on localhost.
+    import uvicorn
+
+    uvicorn.run(app, host="127.0.0.1", port=8000)
