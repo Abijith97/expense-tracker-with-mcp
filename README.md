@@ -2,25 +2,37 @@
 
 A Windows-first personal expense tracker. Send a natural-language WhatsApp message, and the application uses a local Qwen3 model through Ollama to extract expenses and append them to a Google Sheet.
 
-> This project does **not** use MCP. Its current flow is: WhatsApp → Twilio → FastAPI → Ollama/Qwen3 → Google Sheets.
+> This project does **not** use MCP. It has three parts: a user-facing WhatsApp/Twilio side, the local Windows application, and an ngrok tunnel that connects them during development.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    User[WhatsApp user] -->|Expense message| Twilio[Twilio WhatsApp Sandbox]
-    Twilio -->|HTTP POST /webhook| Ngrok[ngrok public tunnel]
+    subgraph UserSide[User-facing side]
+        User[WhatsApp user] -->|Expense message| Twilio[Twilio WhatsApp Sandbox]
+    end
 
-    subgraph Windows[Windows computer]
+    subgraph Tunnel[Public development tunnel]
+        Ngrok[ngrok public HTTPS address]
+    end
+
+    subgraph Windows[Application side: Windows computer]
         Ngrok -->|Forwards to port 8000| API[FastAPI application]
         API -->|Natural-language message| Ollama[Ollama<br/>Qwen3 8B]
         Ollama -->|Structured expense JSON| API
     end
 
+    Twilio -->|HTTP POST /webhook| Ngrok
     API -->|Append expense rows| Sheet[Google Sheets<br/>Expense_Tracker]
 ```
 
-All components in the **Windows computer** section run locally. Twilio and Google Sheets are cloud services; ngrok makes the local FastAPI webhook reachable by Twilio during development.
+| Part | Responsibility |
+| --- | --- |
+| User-facing side | WhatsApp is where the user sends expenses. Twilio receives the message and sends a webhook. |
+| Tunnel | ngrok gives Twilio a public HTTPS URL and forwards each webhook to the local Windows app. |
+| Application side | FastAPI receives the webhook, Ollama/Qwen3 extracts expense data, and Google Sheets stores it. |
+
+All components in the **Application side** run locally on Windows. Twilio and Google Sheets are cloud services.
 
 ## What it does
 
@@ -37,6 +49,15 @@ the application extracts one record for each expense and writes rows like these 
 | 2026-08-23 | Food | Lunch | 200 |
 | 2026-08-23 | Transport | Bus | 23 |
 
+## Setup overview
+
+There are two one-time setup tasks, followed by two commands to run whenever you want to use the tracker:
+
+1. Set up the **application side**: Python, Ollama, Google Sheets, and the project.
+2. Set up the **user-facing side**: Twilio WhatsApp Sandbox and your phone.
+3. Each time you use the tracker, start FastAPI and then start ngrok.
+4. Copy the current ngrok URL to Twilio if it has changed.
+
 ## Prerequisites
 
 - Windows 10 or 11
@@ -46,7 +67,9 @@ the application extracts one record for each expense and writes rows like these 
 - A Twilio account with access to the WhatsApp Sandbox
 - A Google account for a Google Cloud service account and Google Sheet
 
-## 1. Clone and install Python dependencies
+## Application-side setup (one time)
+
+### 1. Clone and install Python dependencies
 
 Open PowerShell and run:
 
@@ -65,7 +88,7 @@ If PowerShell blocks activation, run this for the current PowerShell session and
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 ```
 
-## 2. Install and run Ollama
+### 2. Install and run Ollama
 
 Install Ollama for Windows from [ollama.com](https://ollama.com/), then download the model:
 
@@ -85,7 +108,7 @@ The app connects to Ollama at `http://127.0.0.1:11434` by default. You can overr
 $env:OLLAMA_HOST = "http://192.168.1.10:11434"
 ```
 
-## 3. Set up Google Sheets
+### 3. Set up Google Sheets
 
 1. Create a Google Sheet named `Expense_Tracker`.
 2. Put these headers in the first row: `Date`, `Category`, `Event`, `Price`.
@@ -102,7 +125,19 @@ If your spreadsheet has a different name, set it before launching the app:
 $env:SPREADSHEET_NAME = "My Expense Sheet"
 ```
 
-## 4. Run the local web server
+## User-facing setup (one time)
+
+### 4. Configure Twilio WhatsApp Sandbox
+
+1. Sign in to the [Twilio Console](https://console.twilio.com/).
+2. Open **Try WhatsApp** and activate the WhatsApp Sandbox if prompted.
+3. On your phone, send `join <your sandbox code>` to the Sandbox WhatsApp number, or scan the displayed QR code. Twilio will confirm that your phone has joined the Sandbox.
+
+You will add the webhook address after starting ngrok in the next section. The Sandbox only accepts messages from phone numbers that have joined it. Each tester must join with the current Sandbox code. See Twilio's [WhatsApp quickstart](https://www.twilio.com/docs/whatsapp/quickstart) for the current Console flow.
+
+## Run the application and tunnel (every time)
+
+### 5. Start the FastAPI application
 
 In PowerShell, from the project folder with the virtual environment activated:
 
@@ -112,7 +147,7 @@ uvicorn main:app --reload --host 127.0.0.1 --port 8000
 
 Leave this terminal running. FastAPI is now listening at `http://127.0.0.1:8000`.
 
-## 5. Expose the local server with ngrok
+### 6. Start the ngrok tunnel
 
 In a second PowerShell window, authenticate ngrok once using the token from your ngrok dashboard:
 
@@ -134,23 +169,24 @@ https://example-1234.ngrok-free.app
 
 ngrok's free URL changes whenever you start a new tunnel. It is suitable for development only.
 
-## 6. Configure Twilio WhatsApp Sandbox
+### 7. Connect Twilio to the current tunnel
 
-1. Sign in to the [Twilio Console](https://console.twilio.com/).
-2. Open **Try WhatsApp** and activate the WhatsApp Sandbox if prompted.
-3. On your phone, send `join <your sandbox code>` to the Sandbox WhatsApp number, or scan the displayed QR code. Twilio will confirm that your phone has joined the Sandbox.
-4. In **Sandbox settings**, find **When a message comes in**.
-5. Enter your ngrok HTTPS address with `/webhook` appended, for example:
+1. In Twilio, open **Try WhatsApp** → **Sandbox settings**.
+2. In **When a message comes in**, enter your current ngrok HTTPS address with `/webhook` appended, for example:
 
    ```text
    https://example-1234.ngrok-free.app/webhook
    ```
 
-6. Select **HTTP POST** and save the settings.
+3. Select **HTTP POST** and save the settings.
 
-The Sandbox only accepts messages from phone numbers that have joined it. Each tester must join with the current Sandbox code. See Twilio's [WhatsApp quickstart](https://www.twilio.com/docs/whatsapp/quickstart) for the current Console flow.
+### Should FastAPI start ngrok automatically?
 
-## 7. Test the complete flow
+For a personal development project, starting both can be convenient. However, ngrok is better kept separate from `main.py` for now: it has its own authentication token and public URL lifecycle, and separating it makes tunnel failures and public exposure easier to see and control.
+
+A good future convenience improvement is a `start.ps1` script that starts both processes. That keeps the application code focused on expense processing while reducing the number of commands a user must run.
+
+## Test the complete flow
 
 Send a WhatsApp message from the phone that joined the Sandbox:
 
