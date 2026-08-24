@@ -34,6 +34,31 @@ flowchart LR
 
 All components in the **Application side** run locally on Windows. Twilio and Google Sheets are cloud services.
 
+## Goal architecture
+
+The current application is a personal, local tracker. The final multi-user version will run as a hosted service: users message one WhatsApp Business number, and the backend keeps each user's data separate. MCP provides a stable interface for the AI application, future dashboard, and other MCP-capable clients to access the expense domain safely.
+
+```mermaid
+flowchart TB
+    User[WhatsApp user] -->|Expense or report request| Twilio[Twilio / WhatsApp Business]
+    Twilio -->|Verified webhook| API[Hosted FastAPI application]
+
+    subgraph Application[Application service]
+        API --> Identity[User identity and webhook deduplication]
+        Identity --> Agent[Conversation orchestrator<br/>LLM + MCP client]
+        Agent -->|MCP tools| MCP[Expense MCP server]
+        MCP --> Database[(PostgreSQL<br/>users and expenses)]
+    end
+
+    Scheduler[Weekly-report scheduler] -->|MCP tools| MCP
+    Scheduler -->|Approved WhatsApp template| Twilio
+
+    Dashboard[Future web dashboard] -->|MCP tools or application API| MCP
+    Client[Copilot or another MCP client] -->|MCP| MCP
+```
+
+The MCP server will expose focused operations such as `record_expense`, `get_weekly_summary`, `compare_weeks`, and `get_category_trend`. The database—not the LLM—will calculate totals and comparisons. Google Sheets can remain an optional export or reporting integration rather than the primary multi-user data store.
+
 ## What it does
 
 For a message such as:
