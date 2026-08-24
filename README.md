@@ -194,6 +194,26 @@ https://example-1234.ngrok-free.app
 
 ngrok's free URL changes whenever you start a new tunnel. It is suitable for development only.
 
+### How ngrok forwards the Twilio webhook
+
+Your FastAPI app listens at `http://127.0.0.1:8000`. The `127.0.0.1` address is private to your laptop, so Twilio cannot send an internet request directly to it. Starting ngrok with `ngrok http 8000` creates a secure outbound connection from the ngrok program on your laptop to ngrok's cloud service. ngrok then assigns a public HTTPS address to that connection.
+
+After you put that public address into Twilio's Sandbox webhook setting, the flow for every WhatsApp message is:
+
+```text
+WhatsApp user
+  → Twilio WhatsApp Sandbox
+  → HTTPS POST https://your-ngrok-url/webhook
+  → ngrok cloud service
+  → existing secure ngrok tunnel
+  → http://127.0.0.1:8000/webhook on your laptop
+  → FastAPI application
+```
+
+ngrok does not run FastAPI, Ollama, or the LLM. It only makes the local FastAPI webhook reachable from the public internet. FastAPI receives the message on port `8000`, then separately calls the local Ollama service on port `11434` to extract the expense JSON.
+
+This is similar to an SSH reverse tunnel in concept: both use an outbound connection from your laptop so external traffic can reach a local service. ngrok is designed specifically for HTTP/HTTPS, gives you a public HTTPS URL and TLS certificate, and provides a local request-inspection page at `http://127.0.0.1:4040` while it is running.
+
 ### 7. Connect Twilio to the current tunnel
 
 1. In Twilio, open **Try WhatsApp** → **Sandbox settings**.
