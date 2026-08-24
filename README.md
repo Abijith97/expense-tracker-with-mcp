@@ -105,7 +105,7 @@ ollama list
 The app connects to Ollama at `http://127.0.0.1:11434` by default. You can override this, for example when using another machine, before starting the app:
 
 ```powershell
-$env:OLLAMA_HOST = "http://192.168.1.10:11434"
+$env:OLLAMA_CLIENT_HOST = "http://192.168.1.10:11434"
 ```
 
 ### 3. Set up Google Sheets

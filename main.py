@@ -15,7 +15,10 @@ from ollama import Client
 app = FastAPI()
 
 # Connection details for the local Ollama instance and Google Sheets workbook.
-OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434")
+# Use a client-specific setting so Ollama's server-side `OLLAMA_HOST` setting
+# does not accidentally point this application at its bind address (for
+# example, `0.0.0.0:11434`, which is not a valid destination to connect to).
+OLLAMA_HOST = os.getenv("OLLAMA_CLIENT_HOST", "http://127.0.0.1:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3:8b")
 SPREADSHEET_NAME = os.getenv("SPREADSHEET_NAME", "Expense_Tracker")
 SERVICE_ACCOUNT_FILE = os.getenv("SERVICE_ACCOUNT_FILE", "service-account.json")
@@ -136,6 +139,8 @@ async def whatsapp_webhook(request: Request) -> str:
     response = ollama_client.chat(
         model=OLLAMA_MODEL,
         messages=[{"role": "user", "content": build_extraction_prompt(user_message)}],
+        format="json",
+        think=False,
     )
     response_text = response.message.content
 
@@ -144,7 +149,13 @@ async def whatsapp_webhook(request: Request) -> str:
 
     # The model is instructed to return {"expenses": [...]} and nothing else.
     extracted_data = json.loads(response_text)
-    append_expenses(extracted_data["expenses"])
+    expenses = extracted_data.get("expenses", [])
+
+    if not isinstance(expenses, list):
+        raise ValueError("The model response contains an invalid expenses field.")
+
+    # A non-expense message can legitimately produce no records.
+    append_expenses(expenses)
 
     return "OK"
 
