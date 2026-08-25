@@ -36,28 +36,24 @@ All components in the **Application side** run locally on Windows. Twilio and Go
 
 ## Goal architecture
 
-The current application is a personal, local tracker. The final multi-user version will run as a hosted service: users message one WhatsApp Business number, and the backend keeps each user's data separate. MCP provides a stable interface for the AI application, future dashboard, and other MCP-capable clients to access the expense domain safely.
+The next goal is a proof of concept for a multi-user WhatsApp finance tracker. A user will be identified by their WhatsApp number, log expenses in natural language, and ask simple questions such as “How much did I spend on food last week?” This remains a local development project; production hosting, scheduled reports, dashboards, billing, and enterprise onboarding are intentionally out of scope for now.
 
 ```mermaid
 flowchart TB
-    User[WhatsApp user] -->|Expense or report request| Twilio[Twilio / WhatsApp Business]
-    Twilio -->|Verified webhook| API[Hosted FastAPI application]
+    User[WhatsApp user] -->|Expense or question| Twilio[Twilio WhatsApp Sandbox]
+    Twilio -->|HTTPS POST webhook| Ngrok[ngrok public tunnel]
+    Ngrok -->|Forward to port 8000| API[FastAPI POC application]
 
-    subgraph Application[Application service]
-        API --> Identity[User identity and webhook deduplication]
-        Identity --> Agent[Conversation orchestrator<br/>LLM + MCP client]
+    subgraph Laptop[Local Windows development environment]
+        API --> Identity[User identity by WhatsApp number<br/>and webhook deduplication]
+        Identity --> LLM[Ollama / Qwen<br/>extract expense or understand question]
+        LLM --> Agent[Simple conversation orchestrator<br/>MCP client]
         Agent -->|MCP tools| MCP[Expense MCP server]
-        MCP --> Database[(PostgreSQL<br/>users and expenses)]
+        MCP --> Database[(SQLite database<br/>users and expenses)]
     end
-
-    Scheduler[Weekly-report scheduler] -->|MCP tools| MCP
-    Scheduler -->|Approved WhatsApp template| Twilio
-
-    Dashboard[Future web dashboard] -->|MCP tools or application API| MCP
-    Client[Copilot or another MCP client] -->|MCP| MCP
 ```
 
-The MCP server will expose focused operations such as `record_expense`, `get_weekly_summary`, `compare_weeks`, and `get_category_trend`. The database—not the LLM—will calculate totals and comparisons. Google Sheets can remain an optional export or reporting integration rather than the primary multi-user data store.
+The MCP server will expose focused operations such as `record_expense`, `get_weekly_summary`, `compare_weeks`, and `get_category_trend`. The database—not the LLM—will calculate totals and comparisons. Google Sheets can remain an optional export while the POC is being developed.
 
 ## What it does
 
