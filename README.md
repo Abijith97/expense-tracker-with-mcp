@@ -59,6 +59,25 @@ The MCP server will expose focused operations such as `record_expense`, `get_wee
 
 The future product should be usable entirely through WhatsApp. A user will not install Python, ngrok, or configure Twilio; they will message the service's WhatsApp Business number and receive a private tracker associated with their phone number.
 
+```mermaid
+flowchart TB
+    User[WhatsApp user] -->|START and consent| WhatsApp[Finance Tracker<br/>WhatsApp Business number]
+    WhatsApp --> Onboarding[Create private user profile<br/>phone number, currency, timezone, report preference]
+    Onboarding --> Ready[Tracker ready]
+
+    User -->|Natural-language expense| WhatsApp
+    WhatsApp --> Record[Validate and record expense<br/>under that user's account]
+    Record --> Confirmation[Send confirmation]
+    Confirmation --> User
+
+    User -->|Natural-language question| WhatsApp
+    WhatsApp --> Summary[Query that user's expenses<br/>and calculate exact summary]
+    Summary --> Answer[Send a clear chat response]
+    Answer --> User
+
+    Scheduler[Optional weekly-report schedule] --> Summary
+```
+
 ### First-time setup
 
 ```text
