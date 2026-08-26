@@ -55,6 +55,62 @@ flowchart TB
 
 The MCP server will expose focused operations such as `record_expense`, `get_weekly_summary`, `compare_weeks`, and `get_category_trend`. The database—not the LLM—will calculate totals and comparisons. Google Sheets can remain an optional export while the POC is being developed.
 
+## User experience goal
+
+The future product should be usable entirely through WhatsApp. A user will not install Python, ngrok, or configure Twilio; they will message the service's WhatsApp Business number and receive a private tracker associated with their phone number.
+
+### First-time setup
+
+```text
+User: START
+
+Finance Tracker:
+Welcome! I can record expenses and answer questions about your spending.
+Your expense data is private to this WhatsApp number.
+Reply YES to agree to the privacy terms.
+
+User: YES
+
+Finance Tracker:
+Which currency do you use?
+1. INR
+2. USD
+3. Other
+
+User: INR
+
+Finance Tracker:
+Would you like a weekly spending summary every Sunday?
+Reply YES or NO.
+
+User: YES
+
+Finance Tracker:
+Done—your tracker is ready.
+Try: “Lunch ₹120 today”
+Or ask: “How much did I spend this week?”
+```
+
+### Everyday use
+
+```text
+User: Paid ₹850 for groceries yesterday
+
+Finance Tracker:
+Added: Groceries — ₹850 on 25 Aug 2026.
+
+User: Compare this week with last week
+
+Finance Tracker:
+This week: ₹4,250
+Last week: ₹3,100
+Increase: ₹1,150 (37%)
+
+Largest increase: Food (+₹720)
+```
+
+Users should be able to manage their data through simple chat commands such as `PROFILE`, `EXPORT`, `DELETE MY DATA`, and `STOP`. The product will not ask for bank passwords, card numbers, or account credentials; it records only expenses the user voluntarily sends. The current Twilio Sandbox join code is development-only and will not be part of this user experience.
+
 ## What it does
 
 For a message such as:
