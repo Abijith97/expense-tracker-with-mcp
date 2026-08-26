@@ -38,11 +38,12 @@ VALID_CATEGORIES = [
 ]
 
 
+# Runs once when the app starts up, before it accepts any requests.
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     """Initialize the local database before the application accepts requests."""
     storage.initialize_database()
-    yield
+    yield  # App is now ready to handle requests
 
 
 app = FastAPI(lifespan=lifespan)
@@ -55,42 +56,42 @@ def build_extraction_prompt(user_message: str) -> str:
     categories = "\n".join(f"- {category}" for category in VALID_CATEGORIES)
 
     return f"""
-You are an expense extraction system.
+    You are an expense extraction system.
 
-Today's date is {today}.
+    Today's date is {today}.
 
-Valid categories:
-{categories}
+    Valid categories:
+    {categories}
 
-Return ONLY valid JSON.
+    Return ONLY valid JSON.
 
-Schema:
-{{
-  "expenses": [
+    Schema:
     {{
-      "date": "YYYY-MM-DD",
-      "category": "Category Name",
-      "event": "Description",
-      "price": 0
+    "expenses": [
+        {{
+        "date": "YYYY-MM-DD",
+        "category": "Category Name",
+        "event": "Description",
+        "price": 0
+        }}
+    ]
     }}
-  ]
-}}
 
-Rules:
-- Extract all expenses mentioned in the message.
-- One expense entry per purchase/spend event.
-- The date field is mandatory.
-- Convert all dates to ISO format YYYY-MM-DD.
-- If no date is mentioned, use today's date.
-- Price must be numeric without currency symbols.
-- Choose the most appropriate category from the valid categories list.
-- Preserve important event details.
-- Return JSON only.
-- Do not include markdown, explanations, or additional text.
+    Rules:
+    - Extract all expenses mentioned in the message.
+    - One expense entry per purchase/spend event.
+    - The date field is mandatory.
+    - Convert all dates to ISO format YYYY-MM-DD.
+    - If no date is mentioned, use today's date.
+    - Price must be numeric without currency symbols.
+    - Choose the most appropriate category from the valid categories list.
+    - Preserve important event details.
+    - Return JSON only.
+    - Do not include markdown, explanations, or additional text.
 
-Message:
-{user_message}
-"""
+    Message:
+    {user_message}
+    """
 
 
 def validate_expenses(raw_expenses: object) -> list[dict[str, object]]:
