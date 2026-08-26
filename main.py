@@ -1,32 +1,25 @@
-"""WhatsApp webhook that extracts expenses with Ollama and stores them in Google Sheets."""
+"""WhatsApp webhook that extracts expenses with Ollama and stores them by user."""
+
+from __future__ import annotations
 
 import json
 import os
-from datetime import datetime
+from contextlib import asynccontextmanager
+from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
-import gspread
-from fastapi import FastAPI, Request
-from google.oauth2.service_account import Credentials
+from fastapi import FastAPI, HTTPException, Request
 from ollama import Client
 
+import storage
 
-# The FastAPI application is imported by an ASGI server (for example, Uvicorn).
-app = FastAPI()
 
-# Connection details for the local Ollama instance and Google Sheets workbook.
 # Use a client-specific setting so Ollama's server-side `OLLAMA_HOST` setting
 # does not accidentally point this application at its bind address (for
 # example, `0.0.0.0:11434`, which is not a valid destination to connect to).
 OLLAMA_HOST = os.getenv("OLLAMA_CLIENT_HOST", "http://127.0.0.1:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3:8b")
-SPREADSHEET_NAME = os.getenv("SPREADSHEET_NAME", "Expense_Tracker")
-SERVICE_ACCOUNT_FILE = os.getenv("SERVICE_ACCOUNT_FILE", "service-account.json")
-
-GOOGLE_SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive",
-]
 
 VALID_CATEGORIES = [
     "Food",
@@ -45,14 +38,15 @@ VALID_CATEGORIES = [
 ]
 
 
-# Set up the external clients once when the application starts.
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    """Initialize the local database before the application accepts requests."""
+    storage.initialize_database()
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 ollama_client = Client(host=OLLAMA_HOST)
-credentials = Credentials.from_service_account_file(
-    SERVICE_ACCOUNT_FILE,
-    scopes=GOOGLE_SCOPES,
-)
-google_client = gspread.authorize(credentials)
-sheet = google_client.open(SPREADSHEET_NAME).sheet1
 
 
 def build_extraction_prompt(user_message: str) -> str:
@@ -87,13 +81,6 @@ Rules:
 - One expense entry per purchase/spend event.
 - The date field is mandatory.
 - Convert all dates to ISO format YYYY-MM-DD.
-- Resolve relative dates such as:
-  - today
-  - yesterday
-  - day before yesterday
-  - last Monday
-  - last Sunday
-  - last week
 - If no date is mentioned, use today's date.
 - Price must be numeric without currency symbols.
 - Choose the most appropriate category from the valid categories list.
@@ -106,62 +93,106 @@ Message:
 """
 
 
-def append_expenses(expenses: list[dict[str, Any]]) -> None:
-    """Append the extracted expense records to the first worksheet."""
-    for expense in expenses:
-        sheet.append_row(
-            [
-                expense["date"],
-                expense["category"],
-                expense["event"],
-                expense["price"],
-            ]
+def validate_expenses(raw_expenses: object) -> list[dict[str, object]]:
+    """Validate LLM output before it reaches the database."""
+    if not isinstance(raw_expenses, list):
+        raise ValueError("The model response contains an invalid expenses field.")
+
+    validated_expenses: list[dict[str, object]] = []
+    for raw_expense in raw_expenses:
+        if not isinstance(raw_expense, dict):
+            raise ValueError("Every expense must be a JSON object.")
+
+        try:
+            occurred_on = date.fromisoformat(str(raw_expense["date"]))
+            category = str(raw_expense["category"])
+            event = str(raw_expense["event"]).strip()
+            amount = Decimal(str(raw_expense["price"])).quantize(Decimal("0.01"))
+        except (KeyError, TypeError, ValueError, InvalidOperation) as error:
+            raise ValueError("The model returned an incomplete or invalid expense.") from error
+
+        if category not in VALID_CATEGORIES:
+            raise ValueError(f"Unsupported expense category: {category}")
+        if not event:
+            raise ValueError("Expense descriptions cannot be empty.")
+        if amount <= 0:
+            raise ValueError("Expense amounts must be greater than zero.")
+
+        validated_expenses.append(
+            {
+                "date": occurred_on,
+                "category": category,
+                "event": event,
+                "price": amount,
+            }
         )
-        print(
-            f"Added: {expense['date']} | {expense['category']} | "
-            f"{expense['event']} | {expense['price']}"
-        )
+
+    return validated_expenses
 
 
 @app.post("/webhook")
 async def whatsapp_webhook(request: Request) -> str:
-    """Receive a WhatsApp message, extract expenses, and persist them."""
-    # Twilio sends WhatsApp webhook values as form data.
+    """Receive a Twilio message and store validated expenses under its sender."""
     data = await request.form()
-    user_message = data.get("Body", "")
-    sender = data.get("From", "Unknown")
+    user_message = str(data.get("Body", "")).strip()
+    sender = str(data.get("From", "")).strip()
+    message_sid = str(data.get("MessageSid", "")).strip()
+
+    if not user_message or not sender:
+        raise HTTPException(status_code=400, detail="Twilio webhook must include Body and From values.")
 
     print("\n===== NEW MESSAGE =====")
     print("Sender:", sender)
     print("Message:", user_message)
 
-    # Ask Qwen to return one structured record per spending event.
-    response = ollama_client.chat(
-        model=OLLAMA_MODEL,
-        messages=[{"role": "user", "content": build_extraction_prompt(user_message)}],
-        format="json",
-        think=False,
-    )
-    response_text = response.message.content
+    with storage.SessionLocal() as session:
+        user = storage.get_or_create_user(session, sender)
+        webhook_event = None
 
-    print("\n===== QWEN RESPONSE =====")
-    print(response_text)
+        # Twilio can retry a successful request. A processed MessageSid must not
+        # result in a second expense record.
+        if message_sid:
+            existing_event = storage.get_webhook_event(session, message_sid)
+            if existing_event is not None and existing_event.status == "processed":
+                print("Duplicate webhook ignored:", message_sid)
+                return "OK"
+            if existing_event is not None and existing_event.status == "processing":
+                print("Webhook already being processed:", message_sid)
+                return "OK"
 
-    # The model is instructed to return {"expenses": [...]} and nothing else.
-    extracted_data = json.loads(response_text)
-    expenses = extracted_data.get("expenses", [])
+            webhook_event = existing_event or storage.begin_webhook_event(session, message_sid, user)
 
-    if not isinstance(expenses, list):
-        raise ValueError("The model response contains an invalid expenses field.")
+        try:
+            response = ollama_client.chat(
+                model=OLLAMA_MODEL,
+                messages=[{"role": "user", "content": build_extraction_prompt(user_message)}],
+                format="json",
+                think=False,
+            )
+            response_text = response.message.content
 
-    # A non-expense message can legitimately produce no records.
-    append_expenses(expenses)
+            print("\n===== QWEN RESPONSE =====")
+            print(response_text)
+
+            extracted_data: Any = json.loads(response_text)
+            if not isinstance(extracted_data, dict):
+                raise ValueError("The model response must be a JSON object.")
+
+            expenses = validate_expenses(extracted_data.get("expenses", []))
+            storage.save_expenses(
+                session,
+                user=user,
+                webhook_event=webhook_event,
+                expenses=expenses,
+            )
+        except Exception:
+            storage.mark_webhook_failed(session, webhook_event)
+            raise
 
     return "OK"
 
 
 if __name__ == "__main__":
-    # Running `python main.py` starts the development server on localhost.
     import uvicorn
 
     uvicorn.run(app, host="127.0.0.1", port=8000)

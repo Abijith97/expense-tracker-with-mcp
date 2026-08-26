@@ -4,3 +4,4 @@ __pycache__/
 service-account.json
 logs/
 *.log
+expense_tracker.db
