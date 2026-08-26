@@ -12,9 +12,10 @@ flowchart TB
 
     subgraph Application[Hosted application service]
         API --> Identity[User onboarding, consent,<br/>identity, and webhook deduplication]
-        Identity --> LLM[LLM understands the message<br/>and formats the response]
-        LLM --> Agent[Conversation orchestrator<br/>MCP client]
-        Agent -->|MCP tools| MCP[Expense MCP server]
+        Identity --> Agent[Controlled agent orchestrator<br/>MCP client]
+        Agent <-->|Message, tool allowlist,<br/>and tool results| LLM[LLM]
+        Agent --> Guardrails[Validate tool arguments,<br/>inject authenticated user identity,<br/>enforce deletion confirmation]
+        Guardrails -->|Approved MCP tool call| MCP[Expense MCP server]
         MCP --> Database[(PostgreSQL<br/>users and expenses)]
     end
 
@@ -27,6 +28,34 @@ flowchart TB
 ### MCP client and server roles
 
 The hosted FastAPI application is the **MCP host**. Its conversation orchestrator acts as an **MCP client**: it interprets a WhatsApp message with the LLM, chooses the appropriate tool, and sends the tool result back to the user in a clear response. The **Expense MCP server** owns the finance operations and is the only component that reads or changes the expense database.
+
+### Controlled AI-agent orchestration
+
+The current POC uses a small, controlled AI-agent-style loop rather than relying on keyword commands. For each message, Ollama/Qwen selects one MCP action from an allowlist, FastAPI validates its arguments and adds the authenticated WhatsApp number, then the Expense MCP server performs the database operation. The agent may make at most three tool calls before it must reply.
+
+```mermaid
+sequenceDiagram
+    participant U as WhatsApp user
+    participant A as FastAPI agent orchestrator
+    participant L as Ollama/Qwen
+    participant M as Expense MCP server
+    participant D as SQLite database
+
+    U->>A: "How do I use this finance tracker?"
+    A->>L: Message + allowed tool schemas + current date
+    L-->>A: get_help({})
+    Note over A: Validates action; app owns user identity
+    A->>M: MCP get_help
+    M-->>A: Help and examples
+    A->>L: Tool result
+    L-->>A: Friendly reply
+    A-->>U: Help response
+
+    Note over A,L: Maximum three MCP calls per message
+    Note over A,M: The model cannot confirm a deletion
+```
+
+This is deliberately bounded: the LLM cannot supply another user's identity, invent financial results, or confirm a deletion. Exact `CONFIRM DELETE <id>` is handled by FastAPI, not the model. The MCP server validates every request and the database remains the source of truth for balances and summaries.
 
 | User request | MCP operation | Result |
 | --- | --- | --- |
