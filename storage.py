@@ -102,6 +102,11 @@ def get_or_create_user(session: Session, whatsapp_number: str) -> User:
     return user
 
 
+def get_user(session: Session, whatsapp_number: str) -> User | None:
+    """Return an existing user without creating an account."""
+    return session.scalar(select(User).where(User.whatsapp_number == whatsapp_number))
+
+
 def get_webhook_event(session: Session, message_sid: str) -> WebhookEvent | None:
     """Look up a prior delivery of a Twilio message."""
     return session.scalar(select(WebhookEvent).where(WebhookEvent.message_sid == message_sid))
@@ -147,4 +152,14 @@ def mark_webhook_failed(session: Session, webhook_event: WebhookEvent | None) ->
         return
 
     webhook_event.status = "failed"
+    session.commit()
+
+
+def mark_webhook_processed(session: Session, webhook_event: WebhookEvent | None) -> None:
+    """Mark a non-expense tool request as successfully handled."""
+    if webhook_event is None:
+        return
+
+    webhook_event.status = "processed"
+    webhook_event.processed_at = datetime.now(timezone.utc)
     session.commit()

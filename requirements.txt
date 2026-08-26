@@ -1,4 +1,5 @@
 fastapi
+mcp
 ollama
 python-multipart
 sqlalchemy

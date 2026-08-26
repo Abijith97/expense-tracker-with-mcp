@@ -24,7 +24,30 @@ flowchart TB
     Twilio --> User
 ```
 
-The MCP server exposes focused operations such as `record_expense`, `get_weekly_summary`, `compare_weeks`, and `get_category_trend`. Each expense belongs to one user account. The database—not the LLM—calculates totals and comparisons, while the LLM handles natural-language understanding and friendly responses.
+### MCP client and server roles
+
+The hosted FastAPI application is the **MCP host**. Its conversation orchestrator acts as an **MCP client**: it interprets a WhatsApp message with the LLM, chooses the appropriate tool, and sends the tool result back to the user in a clear response. The **Expense MCP server** owns the finance operations and is the only component that reads or changes the expense database.
+
+| User request | MCP operation | Result |
+| --- | --- | --- |
+| `HELP` or first message | `get_help` | Explains what the tracker can do and gives examples. |
+| “Lunch ₹120 today” | `record_expense` | Validates and records an expense for that user. |
+| “What did I spend this week?” | `get_summary(period)` | Returns an exact daily, weekly, monthly, or yearly summary. |
+| “Show my lunch expense from yesterday” | `find_expenses` / `get_expense` | Finds a specific expense owned by that user. |
+| “Delete the grocery expense from yesterday” | `find_expenses` then `delete_expense` | Shows the matching expense and requires confirmation before deletion. |
+
+Each MCP operation receives the authenticated user identity from the application. The database—not the LLM—calculates totals and comparisons, while the LLM handles natural-language understanding and friendly responses.
+
+### First-time and help experience
+
+On a first message, the application creates the user's private account and explains that they can send `HELP` at any time:
+
+```text
+Finance Tracker: Welcome! I can record expenses and answer questions about your spending.
+Send HELP to see examples, or try: “Lunch ₹120 today”.
+```
+
+`HELP` will include examples for adding expenses, requesting daily/weekly/monthly/yearly summaries, finding a specific expense, and deleting an expense safely.
 
 ## Example user journey
 
