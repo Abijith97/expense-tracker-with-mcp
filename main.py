@@ -21,6 +21,7 @@ from expense_mcp_server import expense_mcp
 
 OLLAMA_HOST = os.getenv("OLLAMA_CLIENT_HOST", "http://127.0.0.1:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3:8b")
+DEBUG_TRACING = os.getenv("DEBUG_TRACING", "true").lower() in {"1", "true", "yes", "on"}
 
 VALID_CATEGORIES = [
     "Food",
@@ -54,6 +55,22 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 ollama_client = OllamaClient(host=OLLAMA_HOST)
+
+
+def trace(event: str, **details: object) -> None:
+    """Print local development traces without exposing full account identifiers."""
+    if not DEBUG_TRACING:
+        return
+
+    fields = " ".join(f"{key}={value!r}" for key, value in details.items())
+    print(f"[expense-tracker] {event}" + (f" | {fields}" if fields else ""), flush=True)
+
+
+def mask_identifier(value: str) -> str:
+    """Keep enough of an identifier for correlation without printing it in full."""
+    if len(value) <= 6:
+        return "***"
+    return f"{value[:4]}...{value[-4:]}"
 
 
 def build_agent_prompt(user_message: str, tool_history: list[dict[str, object]]) -> str:
@@ -146,17 +163,20 @@ def validate_expenses(raw_expenses: object) -> list[dict[str, object]]:
 
 def choose_agent_action(user_message: str, tool_history: list[dict[str, object]]) -> dict[str, Any]:
     """Ask Ollama for one safe next action in the bounded agent loop."""
+    trace("agent_planning", history_count=len(tool_history), message=user_message[:300])
     response = ollama_client.chat(
         model=OLLAMA_MODEL,
         messages=[{"role": "user", "content": build_agent_prompt(user_message, tool_history)}],
         format="json",
         think=False,
     )
+    trace("agent_raw_response", content=response.message.content[:1000])
     action: Any = json.loads(response.message.content)
     if not isinstance(action, dict) or not isinstance(action.get("tool"), str):
         raise ValueError("The agent returned an invalid action.")
     if not isinstance(action.get("arguments", {}), dict):
         raise ValueError("The agent action arguments must be a JSON object.")
+    trace("agent_action", tool=action["tool"], arguments=action.get("arguments", {}))
     return action
 
 
@@ -219,6 +239,8 @@ def agent_tool_arguments(tool_name: str, raw_arguments: dict[str, Any], sender: 
 
 async def call_expense_tool(tool_name: str, arguments: dict[str, object]) -> dict[str, Any]:
     """Invoke an Expense MCP server tool through the application's MCP client."""
+    safe_arguments = {key: value for key, value in arguments.items() if key != "whatsapp_number"}
+    trace("mcp_call_started", tool=tool_name, arguments=safe_arguments)
     async with Client(expense_mcp) as client:
         result = await client.call_tool(tool_name, arguments)
 
@@ -227,6 +249,7 @@ async def call_expense_tool(tool_name: str, arguments: dict[str, object]) -> dic
         raise RuntimeError(message)
     if not isinstance(result.structured_content, dict):
         raise RuntimeError("The expense tool returned an unexpected response.")
+    trace("mcp_call_completed", tool=tool_name, result=result.structured_content)
     return result.structured_content
 
 
@@ -259,6 +282,7 @@ def format_expense(expense: dict[str, Any]) -> str:
 
 async def handle_message(sender: str, message: str, is_first_message: bool) -> str:
     """Run a bounded LLM-planned MCP tool loop for one WhatsApp message."""
+    trace("message_handling_started", sender=mask_identifier(sender), first_message=is_first_message)
     normalized = message.strip().lower()
     confirm_match = re.fullmatch(r"confirm\s+delete\s+(\d+)", normalized)
     if confirm_match:
@@ -269,13 +293,15 @@ async def handle_message(sender: str, message: str, is_first_message: bool) -> s
         return f"Deleted {format_expense(result['expense'])}." if result["deleted"] else result["reason"]
 
     history: list[dict[str, object]] = []
-    for _ in range(3):
+    for turn in range(1, 4):
+        trace("agent_turn_started", turn=turn)
         action = choose_agent_action(message, history)
         tool_name = action["tool"]
         if tool_name == "respond":
             reply = str(action.get("message", "")).strip()
             if reply:
                 prefix = "Welcome! Your private tracker is ready. Send HELP anytime.\n\n" if is_first_message else ""
+                trace("agent_reply_selected", turn=turn, reply=reply[:500])
                 return prefix + reply[:1500]
             break
 
@@ -283,14 +309,29 @@ async def handle_message(sender: str, message: str, is_first_message: bool) -> s
         result = await call_expense_tool(tool_name, arguments)
         history.append({"tool": tool_name, "result": result})
 
+        # Most requests need only one tool call. Returning the trusted tool result
+        # immediately keeps the Twilio webhook fast and avoids depending on the
+        # model to emit a separate `respond` action.
+        if tool_name in {"get_help", "record_expense", "get_summary", "get_expense"}:
+            trace("single_step_tool_completed", tool=tool_name)
+            return render_tool_result(tool_name, result)
+
+        # A normal search can also be answered immediately. Keep the loop only
+        # for a natural-language deletion, which may need find -> delete preview.
+        if tool_name == "find_expenses" and "delete" not in normalized:
+            trace("single_step_search_completed")
+            return render_tool_result(tool_name, result)
+
         # Do not let the model override the confirmation boundary or accidentally
         # continue a destructive request after the preview has been created.
         if tool_name == "delete_expense" and result.get("requires_confirmation"):
             expense = result["expense"]
+            trace("deletion_confirmation_requested", expense_id=expense["id"])
             return f"Delete {format_expense(expense)}? Reply: CONFIRM DELETE {expense['id']}"
 
     if history:
         last_action = history[-1]
+        trace("agent_turn_limit_reached", fallback_tool=last_action["tool"])
         return render_tool_result(str(last_action["tool"]), dict(last_action["result"]))
     prefix = "Welcome! Send HELP to see what I can do.\n\n" if is_first_message else ""
     return f"{prefix}I could not understand that safely. Send HELP for examples."
@@ -323,6 +364,13 @@ async def whatsapp_webhook(request: Request) -> Response:
     if not user_message or not sender:
         raise HTTPException(status_code=400, detail="Twilio webhook must include Body and From values.")
 
+    trace(
+        "webhook_received",
+        sender=mask_identifier(sender),
+        message_sid=mask_identifier(message_sid),
+        body=user_message[:500],
+    )
+
     with storage.SessionLocal() as session:
         is_first_message = storage.get_user(session, sender) is None
         user = storage.get_or_create_user(session, sender)
@@ -331,18 +379,21 @@ async def whatsapp_webhook(request: Request) -> Response:
         if message_sid:
             existing_event = storage.get_webhook_event(session, message_sid)
             if existing_event is not None and existing_event.status in {"processed", "processing"}:
+                trace("webhook_duplicate", message_sid=mask_identifier(message_sid), status=existing_event.status)
                 return twiml_message("This message has already been received.")
             webhook_event = existing_event or storage.begin_webhook_event(session, message_sid, user)
 
     try:
         reply = await handle_message(sender, user_message, is_first_message)
-    except Exception:
+    except Exception as error:
+        trace("webhook_failed", message_sid=mask_identifier(message_sid), error=str(error))
         with storage.SessionLocal() as session:
             storage.mark_webhook_failed(session, storage.get_webhook_event(session, message_sid) if message_sid else None)
         raise
 
     with storage.SessionLocal() as session:
         storage.mark_webhook_processed(session, storage.get_webhook_event(session, message_sid) if message_sid else None)
+    trace("webhook_completed", message_sid=mask_identifier(message_sid), reply=reply[:500])
     return twiml_message(reply)
 
 
