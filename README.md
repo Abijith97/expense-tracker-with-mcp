@@ -1,108 +1,91 @@
 # WhatsApp AI Expense Tracker
 
-## End goal architecture
+## Goal architecture
 
-The end product is a hosted, multi-user WhatsApp finance tracker. Users message one WhatsApp Business number, receive a private account associated with their phone number, record expenses in natural language, and ask questions such as “How much did I spend on food last week?”
+The goal is a reliable, multi-user WhatsApp finance tracker. A user messages one WhatsApp Business number to record expenses or ask questions. The system processes each message privately, uses MCP tools for finance operations, and sends a reply back to WhatsApp.
+
+The POC currently runs locally with FastAPI, Ollama/Qwen, an in-process MCP server, SQLite, Twilio, and ngrok. The diagram below is the target production architecture: the same responsibilities, separated into dependable system functions.
 
 ```mermaid
-flowchart TB
-    User[WhatsApp user] -->|START, expense, or question| WhatsApp[Finance Tracker<br/>WhatsApp Business number]
-    WhatsApp --> Twilio[Twilio WhatsApp Platform]
-    Twilio -->|Verified HTTPS webhook| API[Hosted FastAPI application]
+flowchart LR
+    User[WhatsApp user]
+    Twilio[1. Twilio WhatsApp channel]
+    Ingress[2. Webhook ingress<br/>validation and idempotency]
+    Identity[3. User identity and preferences]
+    Queue[4. Durable message queue]
+    Worker[5. Message-processing worker]
+    Agent[6. Controlled agent orchestrator<br/>MCP client]
+    LLM[LLM]
+    Policy[7. Tool policy and guardrails]
+    MCP[8. Expense MCP server]
+    Data[(9. PostgreSQL<br/>expenses, events, audit log)]
+    Delivery[10. Outbound delivery service]
+    Scheduler[11. Reporting scheduler]
 
-    subgraph Application[Hosted application service]
-        API --> Identity[User onboarding, consent,<br/>identity, and webhook deduplication]
-        Identity --> Agent[Controlled agent orchestrator<br/>MCP client]
-        Agent <-->|Message, tool allowlist,<br/>and tool results| LLM[LLM]
-        Agent --> Guardrails[Validate tool arguments,<br/>inject authenticated user identity,<br/>enforce deletion confirmation]
-        Guardrails -->|Approved MCP tool call| MCP[Expense MCP server]
-        MCP --> Database[(PostgreSQL<br/>users and expenses)]
-    end
-
-    Scheduler[Weekly-report scheduler] -->|Get exact summary| MCP
-    Scheduler -->|Approved WhatsApp template| Twilio
-    API -->|Confirmation or answer| Twilio
-    Twilio --> User
+    User -->|message| Twilio
+    Twilio -->|HTTPS POST| Ingress
+    Ingress -->|verify sender; deduplicate| Identity
+    Ingress -->|store event; return 2xx immediately| Queue
+    Queue --> Worker
+    Worker -->|load profile and message| Agent
+    Agent <-->|tool plan and tool result| LLM
+    Agent --> Policy
+    Policy -->|approved MCP call| MCP
+    MCP <--> Data
+    Worker -->|reply text| Delivery
+    Delivery -->|WhatsApp REST API| Twilio
+    Twilio -->|delivery status| Ingress
+    Scheduler -->|summary jobs| Queue
 ```
 
-### MCP client and server roles
+## System functions and dependencies
 
-The hosted FastAPI application is the **MCP host**. Its conversation orchestrator acts as an **MCP client**: it interprets a WhatsApp message with the LLM, chooses the appropriate tool, and sends the tool result back to the user in a clear response. The **Expense MCP server** owns the finance operations and is the only component that reads or changes the expense database.
+| Order | System function | Depends on | Production responsibility |
+| --- | --- | --- |
+| 1 | **WhatsApp channel** | WhatsApp Business and Twilio | Receives messages and delivers replies. |
+| 2 | **Webhook ingress** | Twilio | Verifies Twilio signatures, parses messages, deduplicates `MessageSid`, records the event, and returns a fast `2xx` response. |
+| 3 | **Identity and preferences** | Database | Maps a WhatsApp number to one private user, currency, timezone, consent, and account state. |
+| 4 | **Durable queue** | Webhook ingress | Stores work safely so a slow LLM, restart, or retry cannot lose a message. |
+| 5 | **Message-processing worker** | Queue and identity | Runs work outside the webhook request, controls retries, and sends failed jobs to a dead-letter queue for review. |
+| 6 | **Controlled agent orchestrator** | Worker and LLM | Interprets the message, chooses only allowlisted MCP tools, limits tool calls, and composes a response. |
+| 7 | **Tool policy and guardrails** | Identity and agent | Adds the authenticated user identity, validates tool arguments, enforces confirmation for destructive actions, and prevents cross-user access. |
+| 8 | **Expense MCP server** | Tool policy and database | Owns the finance operations: record, find, retrieve, summarize, and delete expenses. |
+| 9 | **Data and audit layer** | MCP server and ingress | Stores users, expenses, webhook events, delivery status, and an audit trail. PostgreSQL replaces local SQLite in production. |
+| 10 | **Outbound delivery service** | Worker and Twilio credentials | Sends the completed reply with the Twilio REST API and records its delivery status. |
+| 11 | **Reporting scheduler** | Queue and MCP server | Schedules weekly summaries, comparisons, reminders, and approved template messages. |
 
-### Controlled AI-agent orchestration
+## Why the queue is important
 
-The current POC uses a small, controlled AI-agent-style loop rather than relying on keyword commands. For each message, Ollama/Qwen selects one MCP action from an allowlist, FastAPI validates its arguments and adds the authenticated WhatsApp number, then the Expense MCP server performs the database operation. The agent may make at most three tool calls before it must reply.
+Twilio calls the inbound webhook synchronously and expects a quick response. LLM inference can take longer, so the webhook should only validate and enqueue the message. A worker performs the AI and MCP work afterwards, then sends the finished reply through Twilio's outbound API.
 
 ```mermaid
 sequenceDiagram
     participant U as WhatsApp user
-    participant A as FastAPI agent orchestrator
-    participant L as Ollama/Qwen
+    participant T as Twilio
+    participant I as Webhook ingress
+    participant Q as Durable queue
+    participant W as Worker and agent
     participant M as Expense MCP server
-    participant D as SQLite database
 
-    U->>A: "How do I use this finance tracker?"
-    A->>L: Message + allowed tool schemas + current date
-    L-->>A: get_help({})
-    Note over A: Validates action; app owns user identity
-    A->>M: MCP get_help
-    M-->>A: Help and examples
-    A->>L: Tool result
-    L-->>A: Friendly reply
-    A-->>U: Help response
-
-    Note over A,L: Maximum three MCP calls per message
-    Note over A,M: The model cannot confirm a deletion
+    U->>T: "How much did I spend this week?"
+    T->>I: HTTPS POST
+    I->>Q: Save idempotent message event
+    I-->>T: 200 OK immediately
+    Q->>W: Process message
+    W->>M: get_summary for authenticated user
+    M-->>W: Exact totals
+    W->>T: Send WhatsApp reply through REST API
+    T-->>U: Weekly summary
 ```
 
-This is deliberately bounded: the LLM cannot supply another user's identity, invent financial results, or confirm a deletion. Exact `CONFIRM DELETE <id>` is handled by FastAPI, not the model. The MCP server validates every request and the database remains the source of truth for balances and summaries.
+## Production upgrade order
 
-| User request | MCP operation | Result |
-| --- | --- | --- |
-| `HELP` or first message | `get_help` | Explains what the tracker can do and gives examples. |
-| “Lunch ₹120 today” | `record_expense` | Validates and records an expense for that user. |
-| “What did I spend this week?” | `get_summary(period)` | Returns an exact daily, weekly, monthly, or yearly summary. |
-| “Show my lunch expense from yesterday” | `find_expenses` / `get_expense` | Finds a specific expense owned by that user. |
-| “Delete the grocery expense from yesterday” | `find_expenses` then `delete_expense` | Shows the matching expense and requires confirmation before deletion. |
+1. Add asynchronous outbound delivery: queue the inbound event, return quickly, then use Twilio's REST API from a worker.
+2. Move SQLite to PostgreSQL and add migrations, backups, encrypted secrets, and audit records.
+3. Add Twilio signature verification, rate limiting, structured logs, metrics, alerts, and a dead-letter queue.
+4. Host the API, worker, database, and queue in cloud infrastructure; remove ngrok from the production path.
+5. Add onboarding, user settings, exports, account deletion, scheduled reports, and support/admin tooling.
 
-Each MCP operation receives the authenticated user identity from the application. The database—not the LLM—calculates totals and comparisons, while the LLM handles natural-language understanding and friendly responses.
+## MCP boundary
 
-### First-time and help experience
-
-On a first message, the application creates the user's private account and explains that they can send `HELP` at any time:
-
-```text
-Finance Tracker: Welcome! I can record expenses and answer questions about your spending.
-Send HELP to see examples, or try: “Lunch ₹120 today”.
-```
-
-`HELP` will include examples for adding expenses, requesting daily/weekly/monthly/yearly summaries, finding a specific expense, and deleting an expense safely.
-
-## Example user journey
-
-The user needs only WhatsApp; they do not install the application or configure Twilio.
-
-```text
-User: START
-
-Finance Tracker: Welcome. Reply YES to create your private tracker.
-
-User: YES
-
-Finance Tracker: Which currency do you use?
-
-User: INR
-
-Finance Tracker: Your tracker is ready. Try: “Lunch ₹120 today”.
-
-User: Paid ₹850 for groceries yesterday
-
-Finance Tracker: Added: Groceries — ₹850 on 25 Aug 2026.
-
-User: Compare this week with last week
-
-Finance Tracker: This week: ₹4,250. Last week: ₹3,100.
-Increase: ₹1,150 (37%). Largest increase: Food (+₹720).
-```
-
-The user can later ask for summaries in natural language and manage their account through commands such as `PROFILE`, `EXPORT`, `DELETE MY DATA`, and `STOP`.
+FastAPI is the MCP host. The controlled agent is its MCP client. The Expense MCP server is the finance-domain boundary and is the only component allowed to read or change expense data. The LLM never directly queries the database, supplies another user's identity, or confirms a deletion.
