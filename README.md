@@ -9,50 +9,70 @@ The POC currently runs locally with FastAPI, Ollama/Qwen, an in-process MCP serv
 ```mermaid
 flowchart LR
     User[WhatsApp user]
-    Twilio[1. Twilio WhatsApp channel]
-    Ingress[2. Webhook ingress<br/>validation and idempotency]
-    Identity[3. User identity and preferences]
-    Queue[4. Durable message queue]
-    Worker[5. Message-processing worker]
-    Agent[6. Controlled agent orchestrator<br/>MCP client]
-    LLM[LLM]
-    Policy[7. Tool policy and guardrails]
-    MCP[8. Expense MCP server]
-    Data[(9. PostgreSQL<br/>expenses, events, audit log)]
-    Delivery[10. Outbound delivery service]
-    Scheduler[11. Reporting scheduler]
+    Twilio[Twilio WhatsApp]
+
+    subgraph Ingress[Ingress layer]
+        Webhook[Webhook ingress<br/>signature verification and idempotency]
+    end
+
+    subgraph Processing[Asynchronous processing layer]
+        Queue[Durable message queue]
+        Worker[Message-processing worker]
+        Delivery[Outbound delivery service]
+        Scheduler[Reporting scheduler]
+    end
+
+    subgraph Intelligence[Application intelligence layer]
+        Accounts[Account and preference service]
+        Agent[Controlled agent orchestrator<br/>MCP client]
+        LLM[LLM]
+        Policy[Tool policy and guardrails]
+    end
+
+    subgraph Domain[Finance domain layer]
+        MCP[Expense MCP server]
+    end
+
+    subgraph State[Durable state layer]
+        Data[(PostgreSQL<br/>accounts, expenses, message events, audit log)]
+    end
 
     User -->|message| Twilio
-    Twilio -->|HTTPS POST| Ingress
-    Ingress -->|verify sender; deduplicate| Identity
-    Ingress -->|store event; return 2xx immediately| Queue
+    Twilio -->|HTTPS POST| Webhook
+    Webhook -->|store inbound event and deduplication state| Data
+    Webhook -->|enqueue message; return 2xx immediately| Queue
     Queue --> Worker
-    Worker -->|load profile and message| Agent
+    Worker -->|load account and preferences| Accounts
+    Accounts <--> Data
+    Worker -->|message and user context| Agent
     Agent <-->|tool plan and tool result| LLM
     Agent --> Policy
     Policy -->|approved MCP call| MCP
     MCP <--> Data
     Worker -->|reply text| Delivery
     Delivery -->|WhatsApp REST API| Twilio
-    Twilio -->|delivery status| Ingress
+    Delivery -->|record outbound status| Data
+    Twilio -->|delivery status callback| Webhook
     Scheduler -->|summary jobs| Queue
 ```
 
-## System functions and dependencies
+## System functions
 
-| Order | System function | Depends on | Production responsibility |
-| --- | --- | --- |
-| 1 | **WhatsApp channel** | WhatsApp Business and Twilio | Receives messages and delivers replies. |
-| 2 | **Webhook ingress** | Twilio | Verifies Twilio signatures, parses messages, deduplicates `MessageSid`, records the event, and returns a fast `2xx` response. |
-| 3 | **Identity and preferences** | Database | Maps a WhatsApp number to one private user, currency, timezone, consent, and account state. |
-| 4 | **Durable queue** | Webhook ingress | Stores work safely so a slow LLM, restart, or retry cannot lose a message. |
-| 5 | **Message-processing worker** | Queue and identity | Runs work outside the webhook request, controls retries, and sends failed jobs to a dead-letter queue for review. |
-| 6 | **Controlled agent orchestrator** | Worker and LLM | Interprets the message, chooses only allowlisted MCP tools, limits tool calls, and composes a response. |
-| 7 | **Tool policy and guardrails** | Identity and agent | Adds the authenticated user identity, validates tool arguments, enforces confirmation for destructive actions, and prevents cross-user access. |
-| 8 | **Expense MCP server** | Tool policy and database | Owns the finance operations: record, find, retrieve, summarize, and delete expenses. |
-| 9 | **Data and audit layer** | MCP server and ingress | Stores users, expenses, webhook events, delivery status, and an audit trail. PostgreSQL replaces local SQLite in production. |
-| 10 | **Outbound delivery service** | Worker and Twilio credentials | Sends the completed reply with the Twilio REST API and records its delivery status. |
-| 11 | **Reporting scheduler** | Queue and MCP server | Schedules weekly summaries, comparisons, reminders, and approved template messages. |
+These are layers, not a numbered execution order. The **durable state layer** supports several functions at once; it does not come after them.
+
+| Layer | System function | Uses | Owns |
+| --- | --- | --- | --- |
+| Channel | **Twilio WhatsApp** | WhatsApp Business platform | Receiving user messages and delivering replies. |
+| Ingress | **Webhook ingress** | Twilio and durable state | Signature verification, message parsing, idempotency, inbound-event storage, and a fast `2xx` response. |
+| Durable state | **PostgreSQL** | - | Accounts, preferences, expenses, inbound events, outbound-delivery status, and audit records. |
+| Processing | **Durable queue** | Ingress and scheduler | Reliable handoff of inbound messages and scheduled jobs to workers. |
+| Processing | **Worker** | Queue, account service, agent, and delivery service | Retries, time limits, and execution of work outside the inbound webhook. |
+| Intelligence | **Account and preference service** | PostgreSQL | The private user context: identity, currency, timezone, consent, and account state. |
+| Intelligence | **Controlled agent orchestrator** | Worker, LLM, policy, and MCP client | Choosing allowlisted tools and composing a response. |
+| Intelligence | **Tool policy and guardrails** | Account context and agent action | Injecting user identity, validating arguments, and enforcing confirmation before deletion. |
+| Domain | **Expense MCP server** | Guardrails and PostgreSQL | The finance operations: record, find, retrieve, summarize, and delete expenses. |
+| Delivery | **Outbound delivery service** | Worker, PostgreSQL, and Twilio credentials | Sending the final WhatsApp message through Twilio's REST API and recording the outcome. |
+| Processing | **Reporting scheduler** | Queue and MCP server | Triggering weekly summaries, reminders, and approved template messages. |
 
 ## Why the queue is important
 
