@@ -10,23 +10,8 @@ from mcp.server import MCPServer
 from sqlalchemy import func, select
 
 import storage
+from config import VALID_CATEGORIES
 
-
-VALID_CATEGORIES = {
-    "Food",
-    "Transport",
-    "Groceries",
-    "Family",
-    "Gifts",
-    "Utilities",
-    "Clothing",
-    "Investments",
-    "Home & Kitchen",
-    "Family & Leisure",
-    "Family & Celebration",
-    "Snacks",
-    "Other",
-}
 
 expense_mcp = MCPServer(
     "Expense Tracker",

@@ -74,6 +74,23 @@ These are layers, not a numbered execution order. The **durable state layer** su
 | Delivery | **Outbound delivery service** | Worker, PostgreSQL, and Twilio credentials | Sending the final WhatsApp message through Twilio's REST API and recording the outcome. |
 | Processing | **Reporting scheduler** | Queue and MCP server | Triggering weekly summaries, reminders, and approved template messages. |
 
+## Current POC code map
+
+The POC does not yet have a queue, worker, PostgreSQL, scheduler, or outbound REST delivery service. Its files are nevertheless split along the same boundaries so those production upgrades can be added without turning `main.py` back into one large file.
+
+| Current file | System-function boundary | What to read there |
+| --- | --- | --- |
+| `main.py` | Application composition | Creates FastAPI, starts the database and MCP server, registers the webhook, and mounts `/mcp`. |
+| `webhook_ingress.py` | Webhook ingress | Reads Twilio form data, creates/deduplicates users and webhook events, calls the application flow, and returns TwiML. |
+| `agent_orchestrator.py` | Controlled agent orchestrator | Builds the LLM prompt, runs the bounded tool-selection loop, and decides when a tool result is ready to return. |
+| `tool_policy.py` | Tool policy and guardrails | Validates model-proposed values, injects the authenticated WhatsApp number, and prevents the model from confirming deletion. |
+| `mcp_client.py` | MCP client boundary | Makes MCP calls from the application to the Expense MCP server. |
+| `expense_mcp_server.py` | Finance domain / Expense MCP server | Defines the MCP tools and performs finance operations. |
+| `storage.py` | Durable state | Defines SQLite models and database helpers for users, expenses, and webhook events. |
+| `responses.py` | Response and delivery formatting | Converts trusted MCP results into WhatsApp text and wraps replies as TwiML. |
+| `config.py` | Configuration | Holds environment-driven runtime settings and valid expense categories. |
+| `observability.py` | Observability | Provides the masked local trace messages used while debugging. |
+
 ## Why the queue is important
 
 Twilio calls the inbound webhook synchronously and expects a quick response. LLM inference can take longer, so the webhook should only validate and enqueue the message. A worker performs the AI and MCP work afterwards, then sends the finished reply through Twilio's outbound API.
