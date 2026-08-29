@@ -62,17 +62,17 @@ These are layers, not a numbered execution order. The **durable state layer** su
 
 | Layer | System function | Uses | Owns |
 | --- | --- | --- | --- |
-| Channel | **Twilio WhatsApp** | WhatsApp Business platform | Receiving user messages and delivering replies. |
-| Ingress | **Webhook ingress** | Twilio and durable state | Signature verification, message parsing, idempotency, inbound-event storage, and a fast `2xx` response. |
-| Durable state | **PostgreSQL** | - | Accounts, preferences, expenses, inbound events, outbound-delivery status, and audit records. |
-| Processing | **Durable queue** | Ingress and scheduler | Reliable handoff of inbound messages and scheduled jobs to workers. |
-| Processing | **Worker** | Queue, account service, agent, and delivery service | Retries, time limits, and execution of work outside the inbound webhook. |
-| Intelligence | **Account and preference service** | PostgreSQL | The private user context: identity, currency, timezone, consent, and account state. |
-| Intelligence | **Controlled agent orchestrator** | Worker, LLM, policy, and MCP client | Choosing allowlisted tools and composing a response. |
-| Intelligence | **Tool policy and guardrails** | Account context and agent action | Injecting user identity, validating arguments, and enforcing confirmation before deletion. |
-| Domain | **Expense MCP server** | Guardrails and PostgreSQL | The finance operations: record, find, retrieve, summarize, and delete expenses. |
-| Delivery | **Outbound delivery service** | Worker, PostgreSQL, and Twilio credentials | Sending the final WhatsApp message through Twilio's REST API and recording the outcome. |
-| Processing | **Reporting scheduler** | Queue and MCP server | Triggering weekly summaries, reminders, and approved template messages. |
+| Channel | **Twilio WhatsApp** | WhatsApp Business platform | The configured WhatsApp channel: accepting user messages, delivering replies, and reporting message delivery events. |
+| Ingress | **Webhook ingress** | Twilio and durable state | One safe handoff for each incoming message: parse `Body`, `From`, and `MessageSid`; verify the request; prevent duplicate processing; store the inbound event; and return a fast `2xx`. |
+| Durable state | **PostgreSQL** | - | The durable source of truth: accounts, preferences, expenses, inbound events, delivery status, and audit records. It provides private user isolation, idempotency keys, transactions, reporting data, and recovery after a restart. |
+| Processing | **Durable queue** | Ingress and scheduler | The lifecycle of queued work: reliable handoff, delayed retry, ordering where required, and retention of work until a worker acknowledges it. |
+| Processing | **Worker** | Queue, account service, agent, and delivery service | One processing attempt: load the job, apply retry and time-limit policy, run the application flow outside the webhook, and record failure for review. |
+| Intelligence | **Account and preference service** | PostgreSQL | The private user context: identity, currency, timezone, consent, account state, and the lookup that turns a WhatsApp number into an authenticated user. |
+| Intelligence | **Controlled agent orchestrator** | Worker, LLM, policy, and MCP client | The bounded decision loop: interpret the message, choose only allowlisted tools, limit tool calls, and compose a reply. It does not own financial facts. |
+| Intelligence | **Tool policy and guardrails** | Account context and agent action | Authorization and input safety: add the authenticated user identity, validate tool arguments, block cross-user access, and require separate confirmation before deletion. |
+| Domain | **Expense MCP server** | Guardrails and PostgreSQL | Finance-domain behavior: record, find, retrieve, summarize, and delete expenses. It calculates exact results from stored data and enforces finance validation. |
+| Delivery | **Outbound delivery service** | Worker, PostgreSQL, and Twilio credentials | The outbound message lifecycle: send the final reply through Twilio's REST API, retry safe failures, and store sent, delivered, or failed status. |
+| Processing | **Reporting scheduler** | Queue and MCP server | Scheduled job creation: weekly summaries, reminders, and approved template messages. It schedules work; workers perform it. |
 
 ## Current POC code map
 
