@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from time import perf_counter
+
 from fastapi import APIRouter, HTTPException, Request, Response
 
 import storage
@@ -16,6 +18,7 @@ router = APIRouter()
 @router.post("/webhook")
 async def whatsapp_webhook(request: Request) -> Response:
     """Receive one Twilio message and route it through the application flow."""
+    started_at = perf_counter()
     data = await request.form()
     user_message = str(data.get("Body", "")).strip()
     sender = str(data.get("From", "")).strip()
@@ -52,5 +55,10 @@ async def whatsapp_webhook(request: Request) -> Response:
 
     with storage.SessionLocal() as session:
         storage.mark_webhook_processed(session, storage.get_webhook_event(session, message_sid) if message_sid else None)
-    trace("webhook_completed", message_sid=mask_identifier(message_sid), reply=reply[:500])
+    trace(
+        "webhook_completed",
+        message_sid=mask_identifier(message_sid),
+        elapsed_seconds=round(perf_counter() - started_at, 3),
+        reply=reply[:500],
+    )
     return twiml_message(reply)

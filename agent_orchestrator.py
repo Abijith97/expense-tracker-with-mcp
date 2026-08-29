@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime
+from time import perf_counter
 from typing import Any
 
 from ollama import Client as OllamaClient
@@ -73,12 +74,14 @@ Prior tool results (may be empty):
 def choose_agent_action(user_message: str, tool_history: list[dict[str, object]]) -> dict[str, Any]:
     """Ask Ollama for one safe next action in the bounded agent loop."""
     trace("agent_planning", history_count=len(tool_history), message=user_message[:300])
+    started_at = perf_counter()
     response = ollama_client.chat(
         model=OLLAMA_MODEL,
         messages=[{"role": "user", "content": build_agent_prompt(user_message, tool_history)}],
         format="json",
         think=False,
     )
+    trace("agent_planning_completed", elapsed_seconds=round(perf_counter() - started_at, 3))
     trace("agent_raw_response", content=response.message.content[:1000])
     action: Any = json.loads(response.message.content)
     if not isinstance(action, dict) or not isinstance(action.get("tool"), str):
@@ -114,7 +117,13 @@ async def handle_message(sender: str, message: str, is_first_message: bool) -> s
                 return prefix + reply[:1500]
             break
 
+        validation_started_at = perf_counter()
         arguments = agent_tool_arguments(tool_name, action.get("arguments", {}), sender)
+        trace(
+            "tool_policy_completed",
+            tool=tool_name,
+            elapsed_seconds=round(perf_counter() - validation_started_at, 3),
+        )
         result = await call_expense_tool(tool_name, arguments)
         history.append({"tool": tool_name, "result": result})
 

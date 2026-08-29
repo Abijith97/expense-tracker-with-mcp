@@ -11,7 +11,8 @@ from fastapi import Response
 def twiml_message(message: str) -> Response:
     """Create a TwiML WhatsApp reply without outbound API credentials."""
     escaped_message = html.escape(message)
-    return Response(content=f"<Response><Message>{escaped_message}</Message></Response>", media_type="application/xml")
+    content = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escaped_message}</Message></Response>'
+    return Response(content=content, media_type="text/xml")
 
 
 def format_expense(expense: dict[str, Any]) -> str:
