@@ -6,6 +6,43 @@ The goal is a reliable, multi-user WhatsApp finance tracker. A user messages one
 
 The POC currently runs locally with FastAPI, Ollama/Qwen, an in-process MCP server, SQLite, Twilio, and ngrok. The diagram below is the target production architecture: the same responsibilities, separated into dependable system functions.
 
+## Run the current POC (Windows)
+
+You need Python 3.11 or newer, [Ollama](https://ollama.com/), ngrok, a Twilio account with the WhatsApp Sandbox enabled, and this repository cloned locally.
+
+Open **two PowerShell windows** in the project folder. In the first, install dependencies once, download the model once, and start the application:
+
+```powershell
+cd C:\Users\unnia\expense-tracker-with-mcp
+py -m pip install -r requirements.txt
+ollama pull qwen3:8b
+py main.py
+```
+
+If `py` is not available, use the Python executable you installed instead, for example:
+
+```powershell
+& "C:\Users\unnia\AppData\Local\Programs\Python\Python311\python.exe" main.py
+```
+
+The app starts at `http://127.0.0.1:8000`. It automatically creates `expense_tracker.db` in the project folder if it does not already exist. Ollama must be running locally at `http://127.0.0.1:11434`; on most Windows installations it starts in the background after installation. If it is not running, open another PowerShell window and run `ollama serve`.
+
+In the second PowerShell window, expose the local FastAPI server to Twilio:
+
+```powershell
+ngrok http 8000
+```
+
+Copy the HTTPS forwarding address printed by ngrok, for example `https://example.ngrok-free.app`, and configure this exact webhook URL in the Twilio WhatsApp Sandbox settings:
+
+```text
+https://example.ngrok-free.app/webhook
+```
+
+Set the request method to **HTTP POST** and save. In WhatsApp, first send Twilio's displayed `join <sandbox-code>` message to the Sandbox number (when required), then send a natural-language message such as `I spent Rs 120 on lunch today` or `What did I spend this week?`.
+
+Keep the FastAPI and ngrok windows open while testing. ngrok normally gives a new public URL each time it starts, so update the Twilio webhook whenever that URL changes. Press `Ctrl+C` in each window when you are finished.
+
 ```mermaid
 flowchart LR
     User[WhatsApp user]
