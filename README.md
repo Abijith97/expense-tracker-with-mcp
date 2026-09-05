@@ -10,20 +10,25 @@ The POC currently runs locally with FastAPI, Ollama/Qwen, an in-process MCP serv
 
 You need Python 3.11 or newer, [Ollama](https://ollama.com/), ngrok, a Twilio account with the WhatsApp Sandbox enabled, and this repository cloned locally.
 
-Open **two PowerShell windows** in the project folder. In the first, install dependencies once, download the model once, and start the application:
+Open **two PowerShell windows**. In the first, create and activate a project-local virtual environment, install dependencies, download the model, and start the application:
 
 ```powershell
 cd C:\Users\unnia\expense-tracker-with-mcp
-py -m pip install -r requirements.txt
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
 ollama pull qwen3:8b
-py main.py
+python main.py
 ```
 
-If `py` is not available, use the Python executable you installed instead, for example:
+Create the environment only once. On later runs, open PowerShell in the project folder and run:
 
 ```powershell
-& "C:\Users\unnia\AppData\Local\Programs\Python\Python311\python.exe" main.py
+.\.venv\Scripts\Activate.ps1
+python main.py
 ```
+
+If PowerShell blocks activation, run `Set-ExecutionPolicy -Scope Process Bypass` in that window, then activate it again. Alternatively, run the environment's interpreter directly: `& ".\.venv\Scripts\python.exe" main.py`.
 
 The app starts at `http://127.0.0.1:8000`. It automatically creates `expense_tracker.db` in the project folder if it does not already exist. Ollama must be running locally at `http://127.0.0.1:11434`; on most Windows installations it starts in the background after installation. If it is not running, open another PowerShell window and run `ollama serve`.
 
