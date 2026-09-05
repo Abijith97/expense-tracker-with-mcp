@@ -24,7 +24,7 @@ flowchart LR
 
     subgraph Intelligence[Application intelligence layer]
         Accounts[Account and preference service]
-        Agent[Controlled agent orchestrator<br/>MCP client]
+        Dispatcher[LLM-to-MCP dispatcher<br/>MCP client]
         LLM[LLM]
         Policy[Tool policy and guardrails]
     end
@@ -44,9 +44,9 @@ flowchart LR
     Queue --> Worker
     Worker -->|load account and preferences| Accounts
     Accounts <--> Data
-    Worker -->|message and user context| Agent
-    Agent <-->|tool plan and tool result| LLM
-    Agent --> Policy
+    Worker -->|message and user context| Dispatcher
+    Dispatcher -->|one tool selection| LLM
+    Dispatcher --> Policy
     Policy -->|approved MCP call| MCP
     MCP <--> Data
     Worker -->|reply text| Delivery
@@ -66,10 +66,10 @@ These are layers, not a numbered execution order. The **durable state layer** su
 | Ingress | **Webhook ingress** | Twilio and durable state | One safe handoff for each incoming message: parse `Body`, `From`, and `MessageSid`; verify the request; prevent duplicate processing; store the inbound event; and return a fast `2xx`. |
 | Durable state | **PostgreSQL** | - | The durable source of truth: accounts, preferences, expenses, inbound events, delivery status, and audit records. It provides private user isolation, idempotency keys, transactions, reporting data, and recovery after a restart. |
 | Processing | **Durable queue** | Ingress and scheduler | The lifecycle of queued work: reliable handoff, delayed retry, ordering where required, and retention of work until a worker acknowledges it. |
-| Processing | **Worker** | Queue, account service, agent, and delivery service | One processing attempt: load the job, apply retry and time-limit policy, run the application flow outside the webhook, and record failure for review. |
+| Processing | **Worker** | Queue, account service, dispatcher, and delivery service | One processing attempt: load the job, apply retry and time-limit policy, run the application flow outside the webhook, and record failure for review. |
 | Intelligence | **Account and preference service** | PostgreSQL | The private user context: identity, currency, timezone, consent, account state, and the lookup that turns a WhatsApp number into an authenticated user. |
-| Intelligence | **Controlled agent orchestrator** | Worker, LLM, policy, and MCP client | The bounded decision loop: interpret the message, choose only allowlisted tools, limit tool calls, and compose a reply. It does not own financial facts. |
-| Intelligence | **Tool policy and guardrails** | Account context and agent action | Authorization and input safety: add the authenticated user identity, validate tool arguments, block cross-user access, and require separate confirmation before deletion. |
+| Intelligence | **LLM-to-MCP dispatcher** | Worker, LLM, policy, and MCP client | One natural-language routing step: ask the LLM to select one allowlisted MCP tool, then format its trusted result. It does not own financial facts. |
+| Intelligence | **Tool policy and guardrails** | Account context and LLM tool selection | Authorization and input safety: add the authenticated user identity, validate tool arguments, block cross-user access, and require explicit confirmation before deletion. |
 | Domain | **Expense MCP server** | Guardrails and PostgreSQL | Finance-domain behavior: record, find, retrieve, summarize, and delete expenses. It calculates exact results from stored data and enforces finance validation. |
 | Delivery | **Outbound delivery service** | Worker, PostgreSQL, and Twilio credentials | The outbound message lifecycle: send the final reply through Twilio's REST API, retry safe failures, and store sent, delivered, or failed status. |
 | Processing | **Reporting scheduler** | Queue and MCP server | Scheduled job creation: weekly summaries, reminders, and approved template messages. It schedules work; workers perform it. |
@@ -82,7 +82,7 @@ The POC does not yet have a queue, worker, PostgreSQL, scheduler, or outbound RE
 | --- | --- | --- |
 | `main.py` | Application composition | Creates FastAPI, starts the database and MCP server, registers the webhook, and mounts `/mcp`. |
 | `webhook_ingress.py` | Webhook ingress | Reads Twilio form data, creates/deduplicates users and webhook events, calls the application flow, and returns TwiML. |
-| `agent_orchestrator.py` | Controlled agent orchestrator | Builds the LLM prompt, runs the bounded tool-selection loop, and decides when a tool result is ready to return. |
+| `llm_mcp_dispatcher.py` | LLM-to-MCP dispatcher | Builds the tool-selection prompt, makes one LLM call, validates the selected MCP arguments, calls one MCP tool, and formats the result. |
 | `tool_policy.py` | Tool policy and guardrails | Validates model-proposed values, injects the authenticated WhatsApp number, and prevents the model from confirming deletion. |
 | `mcp_client.py` | MCP client boundary | Makes MCP calls from the application to the Expense MCP server. |
 | `expense_mcp_server.py` | Finance domain / Expense MCP server | Defines the MCP tools and performs finance operations. |
@@ -90,6 +90,22 @@ The POC does not yet have a queue, worker, PostgreSQL, scheduler, or outbound RE
 | `responses.py` | Response and delivery formatting | Converts trusted MCP results into WhatsApp text and wraps replies as TwiML. |
 | `config.py` | Configuration | Holds environment-driven runtime settings and valid expense categories. |
 | `observability.py` | Observability | Provides the masked local trace messages used while debugging. |
+
+## Current POC message flow
+
+The POC intentionally uses one natural-language routing step per user message. It does not use an autonomous agent loop or require users to learn commands.
+
+```text
+WhatsApp message
+→ Twilio webhook
+→ FastAPI webhook ingress
+→ LLM selects one MCP tool
+→ tool policy validates arguments and adds the WhatsApp user identity
+→ Expense MCP server reads or writes SQLite
+→ FastAPI returns a TwiML reply
+```
+
+For example, “What is this app?” should cause the LLM to select `get_help`; “I had lunch for Rs 120 today” should select `record_expense`. The LLM never accesses the database directly.
 
 ## Why the queue is important
 
@@ -101,7 +117,7 @@ sequenceDiagram
     participant T as Twilio
     participant I as Webhook ingress
     participant Q as Durable queue
-    participant W as Worker and agent
+    participant W as Worker and dispatcher
     participant M as Expense MCP server
 
     U->>T: "How much did I spend this week?"
@@ -125,4 +141,4 @@ sequenceDiagram
 
 ## MCP boundary
 
-FastAPI is the MCP host. The controlled agent is its MCP client. The Expense MCP server is the finance-domain boundary and is the only component allowed to read or change expense data. The LLM never directly queries the database, supplies another user's identity, or confirms a deletion.
+FastAPI is the MCP host. The LLM-to-MCP dispatcher is its MCP client. The Expense MCP server is the finance-domain boundary and is the only component allowed to read or change expense data. The LLM never directly queries the database or supplies another user's identity.

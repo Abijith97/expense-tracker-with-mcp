@@ -7,7 +7,7 @@ from time import perf_counter
 from fastapi import APIRouter, HTTPException, Request, Response
 
 import storage
-from agent_orchestrator import handle_message
+from llm_mcp_dispatcher import dispatch_message
 from observability import mask_identifier, trace
 from responses import twiml_message
 
@@ -46,7 +46,7 @@ async def whatsapp_webhook(request: Request) -> Response:
             storage.begin_webhook_event(session, message_sid, user)
 
     try:
-        reply = await handle_message(sender, user_message, is_first_message)
+        reply = await dispatch_message(sender, user_message, is_first_message)
     except Exception as error:
         trace("webhook_failed", message_sid=mask_identifier(message_sid), error=str(error))
         with storage.SessionLocal() as session:

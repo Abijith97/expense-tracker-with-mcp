@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -46,8 +47,20 @@ def validate_expenses(raw_expenses: object) -> list[dict[str, object]]:
     return validated_expenses
 
 
-def agent_tool_arguments(tool_name: str, raw_arguments: dict[str, Any], sender: str) -> dict[str, object]:
-    """Validate an agent proposal and inject the authenticated user identity."""
+def _has_explicit_delete_confirmation(user_message: str, expense_id: int) -> bool:
+    """Require a natural-language confirmation that names the expense to delete."""
+    normalized = user_message.lower()
+    confirms_deletion = bool(re.search(r"\b(yes|confirm|confirmed)\b.*\bdelete\b|\bdelete\b.*\b(yes|confirm)", normalized))
+    return confirms_deletion and str(expense_id) in normalized
+
+
+def validated_tool_arguments(
+    tool_name: str,
+    raw_arguments: dict[str, Any],
+    sender: str,
+    user_message: str,
+) -> dict[str, object]:
+    """Validate one LLM tool choice and inject the authenticated user identity."""
     if tool_name == "get_help":
         return {}
     if tool_name == "record_expense":
@@ -97,7 +110,10 @@ def agent_tool_arguments(tool_name: str, raw_arguments: dict[str, Any], sender: 
             raise ValueError("An expense ID is required.") from error
         arguments = {"whatsapp_number": sender, "expense_id": expense_id}
         if tool_name == "delete_expense":
-            # The model never receives authority to confirm a destructive operation.
-            arguments["confirmed"] = False
+            # The model's JSON alone is never enough to confirm a deletion.
+            arguments["confirmed"] = bool(raw_arguments.get("confirmed")) and _has_explicit_delete_confirmation(
+                user_message,
+                expense_id,
+            )
         return arguments
     raise ValueError("The agent selected an unsupported tool.")
