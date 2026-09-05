@@ -110,7 +110,7 @@ These are layers, not a numbered execution order. The **durable state layer** su
 | Processing | **Durable queue** | Ingress and scheduler | The lifecycle of queued work: reliable handoff, delayed retry, ordering where required, and retention of work until a worker acknowledges it. |
 | Processing | **Worker** | Queue, account service, dispatcher, and delivery service | One processing attempt: load the job, apply retry and time-limit policy, run the application flow outside the webhook, and record failure for review. |
 | Intelligence | **Account and preference service** | PostgreSQL | The private user context: identity, currency, timezone, consent, account state, and the lookup that turns a WhatsApp number into an authenticated user. |
-| Intelligence | **LLM-to-MCP dispatcher** | Worker, LLM, policy, and MCP client | One natural-language routing step: ask the LLM to select one allowlisted MCP tool, then format its trusted result. It does not own financial facts. |
+| Intelligence | **LLM-to-MCP dispatcher** | Worker, LLM, policy, and MCP client | One natural-language planning step: ask the LLM to select an ordered, bounded list of allowlisted MCP tools, then format their trusted results. It does not own financial facts. |
 | Intelligence | **Tool policy and guardrails** | Account context and LLM tool selection | Authorization and input safety: add the authenticated user identity, validate tool arguments, block cross-user access, and require explicit confirmation before deletion. |
 | Domain | **Expense MCP server** | Guardrails and PostgreSQL | Finance-domain behavior: record, find, retrieve, summarize, and delete expenses. It calculates exact results from stored data and enforces finance validation. |
 | Delivery | **Outbound delivery service** | Worker, PostgreSQL, and Twilio credentials | The outbound message lifecycle: send the final reply through Twilio's REST API, retry safe failures, and store sent, delivered, or failed status. |
@@ -124,7 +124,7 @@ The POC does not yet have a queue, worker, PostgreSQL, scheduler, or outbound RE
 | --- | --- | --- |
 | `main.py` | Application composition | Creates FastAPI, starts the database and MCP server, registers the webhook, and mounts `/mcp`. |
 | `webhook_ingress.py` | Webhook ingress | Reads Twilio form data, creates/deduplicates users and webhook events, calls the application flow, and returns TwiML. |
-| `llm_mcp_dispatcher.py` | LLM-to-MCP dispatcher | Builds the tool-selection prompt, makes one LLM call, validates the selected MCP arguments, calls one MCP tool, and formats the result. |
+| `llm_mcp_dispatcher.py` | LLM-to-MCP dispatcher | Builds the action-plan prompt, makes one LLM call, validates up to three selected MCP actions, calls them in order, and formats trusted results. |
 | `tool_policy.py` | Tool policy and guardrails | Validates model-proposed values, injects the authenticated WhatsApp number, and prevents the model from confirming deletion. |
 | `mcp_client.py` | MCP client boundary | Makes MCP calls from the application to the Expense MCP server. |
 | `expense_mcp_server.py` | Finance domain / Expense MCP server | Defines the MCP tools and performs finance operations. |
@@ -135,19 +135,21 @@ The POC does not yet have a queue, worker, PostgreSQL, scheduler, or outbound RE
 
 ## Current POC message flow
 
-The POC intentionally uses one natural-language routing step per user message. It does not use an autonomous agent loop or require users to learn commands.
+The POC intentionally uses one natural-language planning step per user message. It does not use an autonomous agent loop or require users to learn commands. The LLM may choose one to three independent MCP actions, in the order requested by the user.
 
 ```text
 WhatsApp message
 → Twilio webhook
 → FastAPI webhook ingress
-→ LLM selects one MCP tool
+→ LLM selects a bounded MCP action plan
 → tool policy validates arguments and adds the WhatsApp user identity
-→ Expense MCP server reads or writes SQLite
+→ Expense MCP server performs each approved action against SQLite
 → FastAPI returns a TwiML reply
 ```
 
-For example, “What is this app?” should cause the LLM to select `get_help`; “I had lunch for Rs 120 today” should select `record_expense`. The LLM never accesses the database directly.
+For example, “What is this app?” should cause the LLM to select `get_help`; “I had lunch for Rs 120 today” should select `record_expense`. A message such as “I spent Rs 120 on travel and find yesterday's lunch expenses to delete” can select `record_expense` followed by `find_expenses`.
+
+Deletion remains deliberately separate. If the user does not provide the expense IDs and explicit confirmation, the app finds and displays the candidate expenses but does not delete them. It asks the user to confirm the specific IDs in a later natural-language message. The LLM never accesses the database directly.
 
 ## Why the queue is important
 

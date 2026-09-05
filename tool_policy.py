@@ -1,4 +1,4 @@
-"""Validation and authorization boundary for agent-selected MCP tools."""
+"""Validation and authorization boundary for LLM-selected MCP tools."""
 
 from __future__ import annotations
 
