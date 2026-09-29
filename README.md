@@ -1,10 +1,98 @@
 # WhatsApp AI Expense Tracker
 
-## Goal architecture
+An expense-tracking POC for learning MCP, AI agents, and orchestration. WhatsApp is the everyday user interface.
 
-The goal is a reliable, multi-user WhatsApp finance tracker. A user messages one WhatsApp Business number to record expenses or ask questions. The system processes each message privately, uses MCP tools for finance operations, and sends a reply back to WhatsApp.
+**Available today:** the [v0.1.0 WhatsApp/MCP POC](https://github.com/Abijith97/expense-tracker-with-mcp/releases/tag/v0.1.0), preserved at commit `432b525` before this architecture update. It uses manually entered WhatsApp messages, local Ollama, FastAPI, MCP, and SQLite. The release contains source code, not an Android installer.
 
-The POC currently runs locally with FastAPI, Ollama/Qwen, an in-process MCP server, SQLite, Twilio, and ngrok. The diagram below is the target production architecture: the same responsibilities, separated into dependable system functions.
+**Next goal, not implemented:** an Android background companion containing a Python orchestrator and five specialized agents. This is a personal learning POC, not a production-readiness plan. The architecture below does not change how the current code runs.
+
+## Goal: WhatsApp interface, Android background companion
+
+1. A new user messages the shared WhatsApp Business number. The backend handles first-contact `get_help` and replies with instructions and an APK download link, even before the user has installed anything.
+2. The user installs the companion, opens its small setup screen, pairs it with their WhatsApp identity, and grants the required SMS permission after reviewing what data will be processed and sent to an external LLM.
+3. An incoming SMS triggers Android background work. The phone-side Python orchestrator calls the financial-message classification agent to decide whether it describes an expenditure.
+4. For an expenditure, the system extracts transaction details, proposes a category, and asks the user to confirm or correct it through WhatsApp.
+5. The orchestrator records the expense through MCP tools. The user can ask spending questions in WhatsApp; a user-query agent selects the appropriate MCP tools and returns their results.
+
+There is no separate daily-use chat interface or finance dashboard. The installed component is still an Android application (APK): a service cannot be distributed as a standalone Windows-style background service. A setup/status screen provides permissions, pairing, and a way to pause tracking. Python can be embedded in that APK, but the existing desktop program and its dependencies must be adapted and verified on Android. See [Android services](https://developer.android.com/develop/background-work/services) and [Python on Android](https://docs.python.org/3/using/android.html).
+
+### Planned architecture
+
+```mermaid
+flowchart TB
+    subgraph Phone[User side - Android phone]
+        WhatsApp[WhatsApp - daily interface]
+        Setup[Companion APK - setup and permissions]
+        SMS[Incoming SMS]
+        Receiver[Native SMS receiver and background work]
+        Orchestrator[Embedded Python orchestrator]
+        Agents[Five specialized agents]
+        Client[MCP client and tool policy]
+        SMS --> Receiver --> Orchestrator
+        Orchestrator <--> Agents
+        Orchestrator --> Client
+    end
+
+    Twilio[Twilio WhatsApp Business channel]
+
+    subgraph Backend[Shared backend - proposed]
+        Bridge[Public WhatsApp bridge<br/>onboarding, pairing, event relay, outbound sending]
+        Gateway[LLM API gateway<br/>provider credentials stay on backend]
+        MCP[Expense MCP server<br/>finance and proposed workflow tools]
+        DB[(SQLite for the POC<br/>expenses, accounts, pending reviews, feedback)]
+        Bridge -->|first-contact get_help| MCP
+        Bridge <-->|pairing and relay state| DB
+        MCP <-->|finance and workflow records| DB
+    end
+
+    LLM[Hosted LLM API]
+    WhatsApp <-->|user messages and replies| Twilio
+    Twilio <-->|inbound webhook and outbound API| Bridge
+    Setup <-->|pair installation with user| Bridge
+    Bridge <-->|authenticated phone event relay| Orchestrator
+    Agents <-->|inference requests and results| Gateway
+    Gateway <--> LLM
+    Client <-->|authenticated MCP calls| MCP
+```
+
+The orchestrator runs **on the phone** in this goal architecture. The backend is still needed: Twilio requires a public webhook, new users need help before installing the APK, and the shared account needs a place to send WhatsApp messages. The phone is not itself a public webhook. Backend-to-phone event delivery needs an authenticated relay; the push/poll mechanism is still to be chosen. Offline phones delay phone-side processing. [Twilio webhook requirements](https://www.twilio.com/docs/usage/webhooks/getting-started-twilio-webhooks)
+
+"Background" means event-triggered work, not an indefinitely running Python process. Android background limits, SMS permissions, and Python package compatibility are part of the first feasibility check. `RECEIVE_SMS` is a restricted permission, so downloading an APK does not by itself grant access. This design covers SMS, not email or RCS. [Android background work](https://developer.android.com/develop/background-work/background-tasks), [SMS permission](https://developer.android.com/reference/android/Manifest.permission#RECEIVE_SMS)
+
+### Five agents and the orchestrator
+
+These are logical roles for learning; they do not require five separate models or continuously running processes. Some begin as one prompt and one model call. The orchestrator owns routing, state, and the next action.
+
+| Component | Responsibility and output |
+| --- | --- |
+| Financial-message classification agent | Use a few-shot prompt containing user-provided examples to classify **expenditures**. Return `true` or `false`; a network/model failure is an error, not `false`. Salary credits, refunds, offers, OTPs, and failed payments are not spending. Define a rule for ambiguous transfers before evaluation. |
+| Category identification agent | Propose a category from agreed examples/categories and confirmed user preferences retrieved through MCP, or return `not sure`. The workflow also needs structured extraction of amount, currency, merchant, date, and transaction direction; a category alone cannot create an expense. |
+| Category validation agent | Interpret the proposed category and the user's WhatsApp reply. Return structured accepted/corrected/rejected/unclear status and a category where supplied; the orchestrator attaches the trusted transaction ID from the pending review. A bare "no" requires a follow-up, not a guessed correction. |
+| Training / feedback agent | Save the original transaction message with its verified category and user-specific preferences. Start with corrected examples or merchant preferences; model fine-tuning is a later experiment. A "yes" does not automatically retrain an LLM or prove better accuracy. Evaluate changes on held-out labelled messages. |
+| User-query agent | Interpret questions such as "What did I spend this week?", select approved MCP tools, and return their results through WhatsApp. Totals come from stored records, not model guesses. |
+| Python orchestrator | Receive SMS and relayed WhatsApp events, invoke agents, persist pending work, correlate replies, apply tool policy, call MCP tools, and request outbound messages through the backend. LangGraph is a candidate, subject to Android compatibility validation. |
+
+### State, MCP, and WhatsApp replies
+
+- **Save before asking:** persist a pending transaction and question ID in the backend database before sending a category question. Link the outbound WhatsApp message ID to that transaction. The phone needs local processing checkpoints and a resume/synchronization path to those records; do not depend on a Python function staying alive while the user replies.
+- **Route the reply:** the WhatsApp webhook reaches the backend, which relays an event to the paired phone. Explicit replies or transaction IDs identify the pending question. If several questions are pending, an unqualified "yes" needs clarification. An unrelated spending question goes to the user-query agent.
+- **Handle silence and late replies:** choose a review timeout during implementation. On expiry, retain the proposed category as unconfirmed (or `Uncategorized` if uncertain), never as verified training data. A late correction updates the same expense instead of inserting another.
+- **Keep MCP explicit:** the phone-side orchestrator hosts the MCP client; the backend hosts the Expense MCP server. Agents propose actions, policy validates them, and server-side authorization binds tool calls to the paired user. The LLM never writes directly to the expense database. The current tools need extensions for pending reviews, category correction, and feedback; the existing `/mcp` endpoint is not ready to expose as an authenticated multi-user remote service.
+- **Keep sending separate from inference:** acknowledge and store webhook events promptly, then send completed answers through the outbound WhatsApp API. This avoids keeping a webhook open while the phone or model works; it does not make inference faster. This delivery change is planned, not implemented.
+- **Later weekly reports:** a backend scheduler can trigger a Sunday 20:00 `Asia/Kolkata` summary through MCP and request WhatsApp delivery. The agent does not watch the clock. Proactive sending must respect WhatsApp's messaging window and template requirements. [WhatsApp messaging rules](https://www.twilio.com/docs/whatsapp/api)
+
+For the POC, the shared database can remain SQLite with schema additions; PostgreSQL and a production queue are not prerequisites for the first SMS experiment. Provider secrets stay on the backend, and pairing must not rely on trusting a phone number supplied by the model or client. Hosted classification sends SMS text off-device through the gateway, not just extracted transaction fields; setup must explain this before tracking is enabled.
+
+### First verifiable milestone
+
+Prove **real Android SMS -> background work -> embedded Python orchestrator -> classification agent -> expenditure result** before implementing the other agents.
+
+1. Install a minimal companion on the actual phone and verify SMS permission and receipt using synthetic messages.
+2. Trigger Python processing from the Android receiver without blocking the receiver on a network call.
+3. Classify a small set of redacted expenditure/non-expenditure examples through the hosted LLM API, logging a message ID, result, and per-stage timings rather than full personal SMS content.
+4. Manually check screen-locked operation, temporary loss of internet, retries without duplicate processing, and model/network timeouts. Treat force-stop separately from normal background operation.
+
+Success means the expected labels appear in diagnostic output and failures are visible. It does not yet demonstrate WhatsApp category confirmation, fix the existing WhatsApp delivery issue, or train a model. No APK or download endpoint exists yet.
 
 ## Run the current POC (Windows)
 
@@ -46,86 +134,18 @@ https://example.ngrok-free.app/webhook
 
 Set the request method to **HTTP POST** and save. In WhatsApp, first send Twilio's displayed `join <sandbox-code>` message to the Sandbox number (when required), then send a natural-language message such as `I spent Rs 120 on lunch today` or `What did I spend this week?`.
 
-Keep the FastAPI and ngrok windows open while testing. ngrok normally gives a new public URL each time it starts, so update the Twilio webhook whenever that URL changes. Press `Ctrl+C` in each window when you are finished.
-
-```mermaid
-flowchart LR
-    User[WhatsApp user]
-    Twilio[Twilio WhatsApp]
-
-    subgraph Ingress[Ingress layer]
-        Webhook[Webhook ingress<br/>signature verification and idempotency]
-    end
-
-    subgraph Processing[Asynchronous processing layer]
-        Queue[Durable message queue]
-        Worker[Message-processing worker]
-        Delivery[Outbound delivery service]
-        Scheduler[Reporting scheduler]
-    end
-
-    subgraph Intelligence[Application intelligence layer]
-        Accounts[Account and preference service]
-        Dispatcher[LLM-to-MCP dispatcher<br/>MCP client]
-        LLM[LLM]
-        Policy[Tool policy and guardrails]
-    end
-
-    subgraph Domain[Finance domain layer]
-        MCP[Expense MCP server]
-    end
-
-    subgraph State[Durable state layer]
-        Data[(PostgreSQL<br/>accounts, expenses, message events, audit log)]
-    end
-
-    User -->|message| Twilio
-    Twilio -->|HTTPS POST| Webhook
-    Webhook -->|store inbound event and deduplication state| Data
-    Webhook -->|enqueue message; return 2xx immediately| Queue
-    Queue --> Worker
-    Worker -->|load account and preferences| Accounts
-    Accounts <--> Data
-    Worker -->|message and user context| Dispatcher
-    Dispatcher -->|one tool selection| LLM
-    Dispatcher --> Policy
-    Policy -->|approved MCP call| MCP
-    MCP <--> Data
-    Worker -->|reply text| Delivery
-    Delivery -->|WhatsApp REST API| Twilio
-    Delivery -->|record outbound status| Data
-    Twilio -->|delivery status callback| Webhook
-    Scheduler -->|summary jobs| Queue
-```
-
-## System functions
-
-These are layers, not a numbered execution order. The **durable state layer** supports several functions at once; it does not come after them.
-
-| Layer | System function | Uses | Owns |
-| --- | --- | --- | --- |
-| Channel | **Twilio WhatsApp** | WhatsApp Business platform | The configured WhatsApp channel: accepting user messages, delivering replies, and reporting message delivery events. |
-| Ingress | **Webhook ingress** | Twilio and durable state | One safe handoff for each incoming message: parse `Body`, `From`, and `MessageSid`; verify the request; prevent duplicate processing; store the inbound event; and return a fast `2xx`. |
-| Durable state | **PostgreSQL** | - | The durable source of truth: accounts, preferences, expenses, inbound events, delivery status, and audit records. It provides private user isolation, idempotency keys, transactions, reporting data, and recovery after a restart. |
-| Processing | **Durable queue** | Ingress and scheduler | The lifecycle of queued work: reliable handoff, delayed retry, ordering where required, and retention of work until a worker acknowledges it. |
-| Processing | **Worker** | Queue, account service, dispatcher, and delivery service | One processing attempt: load the job, apply retry and time-limit policy, run the application flow outside the webhook, and record failure for review. |
-| Intelligence | **Account and preference service** | PostgreSQL | The private user context: identity, currency, timezone, consent, account state, and the lookup that turns a WhatsApp number into an authenticated user. |
-| Intelligence | **LLM-to-MCP dispatcher** | Worker, LLM, policy, and MCP client | One natural-language planning step: ask the LLM to select an ordered, bounded list of allowlisted MCP tools, then format their trusted results. It does not own financial facts. |
-| Intelligence | **Tool policy and guardrails** | Account context and LLM tool selection | Authorization and input safety: add the authenticated user identity, validate tool arguments, block cross-user access, and require explicit confirmation before deletion. |
-| Domain | **Expense MCP server** | Guardrails and PostgreSQL | Finance-domain behavior: record, find, retrieve, summarize, and delete expenses. It calculates exact results from stored data and enforces finance validation. |
-| Delivery | **Outbound delivery service** | Worker, PostgreSQL, and Twilio credentials | The outbound message lifecycle: send the final reply through Twilio's REST API, retry safe failures, and store sent, delivered, or failed status. |
-| Processing | **Reporting scheduler** | Queue and MCP server | Scheduled job creation: weekly summaries, reminders, and approved template messages. It schedules work; workers perform it. |
+Keep the FastAPI and ngrok windows open while testing. Use the HTTPS forwarding URL shown by ngrok and update the Twilio webhook whenever it changes. Press `Ctrl+C` in each window when you are finished.
 
 ## Current POC code map
 
-The POC does not yet have a queue, worker, PostgreSQL, scheduler, or outbound REST delivery service. Its files are nevertheless split along the same boundaries so those production upgrades can be added without turning `main.py` back into one large file.
+These are the files in the existing implementation, not the proposed Android agents. There is no Android companion, hosted LLM integration, phone event relay, training component, scheduler, or outbound REST delivery service yet.
 
 | Current file | System-function boundary | What to read there |
 | --- | --- | --- |
 | `main.py` | Application composition | Creates FastAPI, starts the database and MCP server, registers the webhook, and mounts `/mcp`. |
 | `webhook_ingress.py` | Webhook ingress | Reads Twilio form data, creates/deduplicates users and webhook events, calls the application flow, and returns TwiML. |
 | `llm_mcp_dispatcher.py` | LLM-to-MCP dispatcher | Builds the action-plan prompt, makes one LLM call, validates up to three selected MCP actions, calls them in order, and formats trusted results. |
-| `tool_policy.py` | Tool policy and guardrails | Validates model-proposed values, injects the authenticated WhatsApp number, and prevents the model from confirming deletion. |
+| `tool_policy.py` | Tool policy and guardrails | Validates model-proposed values, injects the webhook sender identity, and checks explicit deletion confirmation. Webhook request authentication is still pending. |
 | `mcp_client.py` | MCP client boundary | Makes MCP calls from the application to the Expense MCP server. |
 | `expense_mcp_server.py` | Finance domain / Expense MCP server | Defines the MCP tools and performs finance operations. |
 | `storage.py` | Durable state | Defines SQLite models and database helpers for users, expenses, and webhook events. |
@@ -151,38 +171,12 @@ For example, “What is this app?” should cause the LLM to select `get_help`; 
 
 Deletion remains deliberately separate. If the user does not provide the expense IDs and explicit confirmation, the app finds and displays the candidate expenses but does not delete them. It asks the user to confirm the specific IDs in a later natural-language message. The LLM never accesses the database directly.
 
-## Why the queue is important
+The current FastAPI application hosts an **in-process MCP client and server**. Moving the client into an Android companion and exposing authenticated remote MCP tools is future work, not just a configuration change.
 
-Twilio calls the inbound webhook synchronously and expects a quick response. LLM inference can take longer, so the webhook should only validate and enqueue the message. A worker performs the AI and MCP work afterwards, then sends the finished reply through Twilio's outbound API.
+## Known limitation of the released POC
 
-```mermaid
-sequenceDiagram
-    participant U as WhatsApp user
-    participant T as Twilio
-    participant I as Webhook ingress
-    participant Q as Durable queue
-    participant W as Worker and dispatcher
-    participant M as Expense MCP server
+The existing webhook waits for the LLM and returns the answer as TwiML. In the reported manual run, LLM selection took **33.867 seconds** and the full webhook took **34.350 seconds**; a reply was generated but did not arrive in WhatsApp. A webhook delivery timeout is suspected, not confirmed from provider logs. See [issue #1](https://github.com/Abijith97/expense-tracker-with-mcp/issues/1).
 
-    U->>T: "How much did I spend this week?"
-    T->>I: HTTPS POST
-    I->>Q: Save idempotent message event
-    I-->>T: 200 OK immediately
-    Q->>W: Process message
-    W->>M: get_summary for authenticated user
-    M-->>W: Exact totals
-    W->>T: Send WhatsApp reply through REST API
-    T-->>U: Weekly summary
-```
+A hosted LLM may reduce inference time, while prompt acknowledgement and separate outbound messaging remove the need to finish that inference within the inbound webhook. These are different improvements, and neither is implemented by this README update. A `webhook_completed` log is not confirmation of WhatsApp delivery.
 
-## Production upgrade order
-
-1. Add asynchronous outbound delivery: queue the inbound event, return quickly, then use Twilio's REST API from a worker.
-2. Move SQLite to PostgreSQL and add migrations, backups, encrypted secrets, and audit records.
-3. Add Twilio signature verification, rate limiting, structured logs, metrics, alerts, and a dead-letter queue.
-4. Host the API, worker, database, and queue in cloud infrastructure; remove ngrok from the production path.
-5. Add onboarding, user settings, exports, account deletion, scheduled reports, and support/admin tooling.
-
-## MCP boundary
-
-FastAPI is the MCP host. The LLM-to-MCP dispatcher is its MCP client. The Expense MCP server is the finance-domain boundary and is the only component allowed to read or change expense data. The LLM never directly queries the database or supplies another user's identity.
+The release is a learning snapshot, not a production-secured deployment. Request authentication, remote MCP authorization, background delivery, and mobile permission handling need implementation and verification before sharing the planned service with other users.
