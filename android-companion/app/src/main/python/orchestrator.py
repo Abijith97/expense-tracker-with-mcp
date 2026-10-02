@@ -1,8 +1,9 @@
-"""Receive an SMS handoff from Android and return a minimal receipt.
+"""Receive SMS and chat messages from the Android application.
 
 This is the lightweight entry point for the future phone-side orchestrator.
 It currently validates the handoff only; it does not run an AI agent, decide
-whether a message is financial, or record an expense.
+whether a message is financial, or record an expense. Chat returns built-in
+capability information until an LLM and phone-side MCP tools are integrated.
 """
 
 from __future__ import annotations
@@ -69,3 +70,48 @@ def handle_sms(payload_json: str) -> str:
         ),
     }
     return json.dumps(receipt)
+
+
+def handle_chat(payload_json: str) -> str:
+    """Return local help through the same embedded Python runtime as SMS capture.
+
+    Every valid message currently receives capability information. This proves
+    the chat handoff without pretending to interpret spending queries. It uses
+    no LLM, MCP server, network, or finance database, and does not echo the input.
+    """
+    invalid_payload = "Invalid chat handoff payload."
+    if not isinstance(payload_json, str):
+        raise ValueError(invalid_payload)
+    try:
+        payload = json.loads(payload_json)
+    except (ValueError, RecursionError):
+        raise ValueError(invalid_payload) from None
+    if not isinstance(payload, dict):
+        raise ValueError(invalid_payload)
+    message_id = payload.get("message_id")
+    body = payload.get("body")
+    if (
+        type(payload.get("schema_version")) is not int
+        or payload["schema_version"] != 1
+        or not isinstance(message_id, str)
+        or not message_id.strip()
+        or not isinstance(body, str)
+        or not body.strip()
+    ):
+        raise ValueError(invalid_payload)
+
+    return json.dumps({
+        "schema_version": 1,
+        "message_id": message_id,
+        "status": "capabilities",
+        "reply": (
+            "Your message reached the phone-side Python orchestrator.\n\n"
+            "This build provides built-in help and captures new SMS after you "
+            "enable access in the SMS capture tab. Captured messages get a "
+            "Python acknowledgement.\n\n"
+            "Expense classification, category confirmation, recording expenses, "
+            "and spending summaries are planned. They are not available yet. "
+            "For now, every chat message returns this help information."
+        ),
+        "processed_at_utc": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+    })

@@ -1,3 +1,4 @@
 /build
-/src/test/
-/src/androidTest/
+# Keep the untouched Android Studio examples local; track real application tests.
+/src/test/java/com/abijith/expensetracker/ExampleUnitTest.kt
+/src/androidTest/java/com/abijith/expensetracker/ExampleInstrumentedTest.kt

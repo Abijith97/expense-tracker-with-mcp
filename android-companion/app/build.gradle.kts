@@ -14,8 +14,8 @@ android {
         applicationId = "com.abijith.expensetracker"
         minSdk = 26
         targetSdk = 37
-        versionCode = 2
-        versionName = "0.2.0-python-handoff"
+        versionCode = 3
+        versionName = "0.3.0-app-chat"
 
         ndk {
             // Pixel 7a and 64-bit Windows-hosted Android emulators.
@@ -66,6 +66,7 @@ dependencies {
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(libs.androidx.test.runner)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

@@ -13,9 +13,11 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
@@ -24,23 +26,28 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.ViewModelProvider
 import com.abijith.expensetracker.ui.theme.FinanceTrackerCompanionTheme
 import java.text.DateFormat
 import java.util.Date
 
-/** Setup/debug screen only. The SMS receiver also works while this screen is closed. */
+/** App chat and SMS diagnostics. The receiver also works while the screen is closed. */
 class MainActivity : ComponentActivity() {
     private lateinit var store: SmsStore
+    private lateinit var chat: ChatViewModel
     private var permissionGranted by mutableStateOf(false)
     private var notice by mutableStateOf<String?>(null)
     private var showPermissionRationale by mutableStateOf(false)
@@ -61,28 +68,43 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         store = SmsStore.get(this)
+        chat = ViewModelProvider(this)[ChatViewModel::class.java]
         enableEdgeToEdge()
         setContent {
             val captureState by store.state.collectAsState()
+            val chatState by chat.state.collectAsState()
+            var selectedTab by rememberSaveable { mutableStateOf(0) }
             FinanceTrackerCompanionTheme {
-                SmsDebugScreen(
-                    state = captureState,
-                    permissionGranted = permissionGranted,
-                    notice = notice,
-                    onEnable = ::enableCapture,
-                    onPause = {
-                        if (store.setEnabled(false)) {
-                            notice = "Capture paused. Existing diagnostic copies remain until cleared."
-                        }
-                    },
-                    onSettings = {
-                        startActivity(
-                            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
-                                .setData(Uri.parse("package:$packageName")),
+                Column(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
+                    TabRow(selectedTabIndex = selectedTab) {
+                        Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 },
+                            text = { Text("Chat") })
+                        Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 },
+                            text = { Text("SMS capture") })
+                    }
+                    if (selectedTab == 0) {
+                        ChatScreen(chatState, onSend = { chat.send(this@MainActivity, it) })
+                    } else {
+                        SmsDebugScreen(
+                            state = captureState,
+                            permissionGranted = permissionGranted,
+                            notice = notice,
+                            onEnable = ::enableCapture,
+                            onPause = {
+                                if (store.setEnabled(false)) {
+                                    notice = "Capture paused. Existing diagnostic copies remain until cleared."
+                                }
+                            },
+                            onSettings = {
+                                startActivity(
+                                    Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                                        .setData(Uri.parse("package:$packageName")),
+                                )
+                            },
+                            onClear = { showClearConfirmation = true },
                         )
-                    },
-                    onClear = { showClearConfirmation = true },
-                )
+                    }
+                }
 
                 if (showPermissionRationale) {
                     AlertDialog(
@@ -159,21 +181,21 @@ private fun SmsDebugScreen(
     onClear: () -> Unit,
 ) {
     val capturing = permissionGranted && state.enabled
-    Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+    Scaffold(modifier = Modifier.fillMaxSize(), contentWindowInsets = WindowInsets(0, 0, 0, 0)) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(innerPadding),
             contentPadding = PaddingValues(20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item {
-                Text("Finance Tracker Companion", style = MaterialTheme.typography.headlineSmall)
+                Text("Finance Tracker", style = MaterialTheme.typography.headlineSmall)
                 Text("Milestone 2: on-phone Python handoff", style = MaterialTheme.typography.titleMedium)
             }
             item {
                 Text("While enabled, this app keeps the latest ${SmsStore.MAX_MESSAGES} incoming SMS messages " +
                     "on this phone, including non-financial messages. Use synthetic messages for testing. " +
                     "Python acknowledges each new capture inside this APK. " +
-                    "No internet access, AI processing, or WhatsApp connection is included.")
+                    "No internet access or AI processing is included in this build.")
             }
             item {
                 Text("SMS permission: ${if (permissionGranted) "Granted" else "Not granted"}")

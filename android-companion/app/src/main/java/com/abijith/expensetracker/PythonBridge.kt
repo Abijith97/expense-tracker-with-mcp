@@ -15,9 +15,17 @@ data class PythonHandoff(
     val elapsedMillis: Long? = null,
 )
 
+/** A user-visible chat reply, with no Python exception details. */
+data class PythonChatReply(
+    val reply: String,
+    val succeeded: Boolean,
+    val elapsedMillis: Long,
+)
+
 /**
- * Kotlin/Python boundary. Called on the receiver's serialized background executor,
- * never on the UI thread. This step performs no network calls or finance actions.
+ * Kotlin/Python boundary. SMS and chat use background executors, never the UI
+ * thread. The synchronized entry points share one embedded Python runtime.
+ * This step performs no network calls or finance actions.
  */
 object PythonBridge {
     @Synchronized
@@ -68,6 +76,43 @@ object PythonBridge {
             failureSince(startedAt)
         }
     }
+
+    @Synchronized
+    fun replyToChat(context: Context, messageId: String, body: String): PythonChatReply {
+        val startedAt = SystemClock.elapsedRealtime()
+        return try {
+            if (!Python.isStarted()) {
+                Python.start(AndroidPlatform(context.applicationContext))
+            }
+            val request = JSONObject()
+                .put("schema_version", 1)
+                .put("message_id", messageId)
+                .put("body", body)
+            val reply = Python.getInstance().getModule("orchestrator")
+                .callAttr("handle_chat", request.toString()).toString()
+            val result = JSONObject(reply)
+            require(result.getInt("schema_version") == 1)
+            require(result.getString("message_id") == messageId)
+            require(result.getString("status") == "capabilities")
+            require(result.getString("reply").isNotBlank())
+            require(result.getString("processed_at_utc").isNotBlank())
+            PythonChatReply(
+                reply = result.getString("reply"),
+                succeeded = true,
+                elapsedMillis = SystemClock.elapsedRealtime() - startedAt,
+            )
+        } catch (_: Exception) {
+            chatFailureSince(startedAt)
+        } catch (_: LinkageError) {
+            chatFailureSince(startedAt)
+        }
+    }
+
+    private fun chatFailureSince(startedAt: Long) = PythonChatReply(
+        reply = "Could not process this message with local Python. Please try again.",
+        succeeded = false,
+        elapsedMillis = SystemClock.elapsedRealtime() - startedAt,
+    )
 
     private fun failureSince(startedAt: Long) = PythonHandoff(
         status = HandoffStatus.FAILED,
