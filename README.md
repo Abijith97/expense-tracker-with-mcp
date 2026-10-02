@@ -4,7 +4,9 @@ An expense-tracking POC for learning MCP, AI agents, and orchestration. WhatsApp
 
 **Available today:** the [v0.1.0 WhatsApp/MCP POC](https://github.com/Abijith97/expense-tracker-with-mcp/releases/tag/v0.1.0), preserved at commit `432b525` before this architecture update. It uses manually entered WhatsApp messages, local Ollama, FastAPI, MCP, and SQLite. The release contains source code, not an Android installer.
 
-**Next goal, not implemented:** an Android background companion containing a Python orchestrator and five specialized agents. This is a personal learning POC, not a production-readiness plan. The architecture below does not change how the current code runs.
+**Android milestones 1-2:** [android-companion](android-companion/README.md) is a separate Kotlin/Compose diagnostic app: SMS permission, explicit capture enable/pause, and a local display of the latest 20 incoming SMS messages. It now bundles Python through Chaquopy: Kotlin saves a new SMS, calls the on-phone `orchestrator.handle_sms` entry point, and displays its JSON receipt and elapsed time. This acknowledgement is not expense classification. No Python server, internet, LLM, or WhatsApp connection is involved. Build/install instructions and manual phone checks are in its guide; this is not part of the existing `v0.1.0` release.
+
+**Next goal, not implemented:** expand the Android companion's minimal Python entry point into the orchestrated five-agent workflow below. This is a personal learning POC, not a production-readiness plan. The full goal architecture is separate from the current offline handoff and the existing WhatsApp POC.
 
 ## Goal: WhatsApp interface, Android background companion
 
@@ -92,7 +94,7 @@ Prove **real Android SMS -> background work -> embedded Python orchestrator -> c
 3. Classify a small set of redacted expenditure/non-expenditure examples through the hosted LLM API, logging a message ID, result, and per-stage timings rather than full personal SMS content.
 4. Manually check screen-locked operation, temporary loss of internet, retries without duplicate processing, and model/network timeouts. Treat force-stop separately from normal background operation.
 
-Success means the expected labels appear in diagnostic output and failures are visible. It does not yet demonstrate WhatsApp category confirmation, fix the existing WhatsApp delivery issue, or train a model. No APK or download endpoint exists yet.
+Success means the expected labels appear in diagnostic output and failures are visible. It does not yet demonstrate WhatsApp category confirmation, fix the existing WhatsApp delivery issue, or train a model. Local capture and the embedded Python acknowledgement are now implemented for building and manual phone checks; financial classification and a public APK download endpoint remain future work.
 
 ## Run the current POC (Windows)
 
@@ -138,7 +140,7 @@ Keep the FastAPI and ngrok windows open while testing. Use the HTTPS forwarding 
 
 ## Current POC code map
 
-These are the files in the existing implementation, not the proposed Android agents. There is no Android companion, hosted LLM integration, phone event relay, training component, scheduler, or outbound REST delivery service yet.
+These are the files in the existing server-side Python implementation, not the proposed Android agents. The separate Android companion captures SMS and runs a local Python acknowledgement only. Hosted LLM integration, full agent orchestration, a phone event relay, training, scheduling, and outbound REST delivery are not implemented yet.
 
 | Current file | System-function boundary | What to read there |
 | --- | --- | --- |
