@@ -39,15 +39,34 @@ class ClassificationStoreInstrumentedTest {
         assertFalse(store.finishClassification(message.id, generation,
             pending.copy(attemptId = "unrelated", status = ClassificationStatus.EXPENDITURE)))
         assertNotNull(store.startClassification(message.id, generation, pending.attemptId))
+        assertTrue(store.canContinueClassification(message.id, generation, pending.attemptId))
+        assertFalse(store.canContinueClassification(message.id, generation, "unrelated"))
         assertTrue(store.setEnabled(false))
+        assertFalse(store.canContinueClassification(message.id, generation, pending.attemptId))
         assertEquals(ClassificationStatus.INTERRUPTED, store.state.value.messages.single().classification!!.status)
         assertFalse(store.finishClassification(message.id, generation, pending.copy(status = ClassificationStatus.EXPENDITURE)))
         assertTrue(store.setEnabled(true))
         val nextGeneration = store.activeGeneration()!!
         val next = store.prepareClassification(message.id, nextGeneration, DEFAULT_CLASSIFIER_MODEL)!!
         assertTrue(store.clear())
+        assertFalse(store.canContinueClassification(message.id, nextGeneration, next.attemptId))
         assertFalse(store.finishClassification(message.id, nextGeneration, next.copy(status = ClassificationStatus.OTHER)))
         assertTrue(store.state.value.messages.isEmpty())
+    }
+
+    @Test
+    fun suggestedCategoryPersistsOnTheOriginalMessage() {
+        val store = SmsStore(context)
+        assertTrue(store.setEnabled(true))
+        val generation = store.activeGeneration()!!
+        assertTrue(store.append(message, generation))
+        val pending = store.prepareClassification(message.id, generation, DEFAULT_CLASSIFIER_MODEL)!!
+        assertNotNull(store.startClassification(message.id, generation, pending.attemptId))
+        val result = pending.copy(status = ClassificationStatus.EXPENDITURE,
+            category = SmsCategory(CategoryStatus.IDENTIFIED, "Groceries", 12.125, 10.375))
+        assertTrue(store.finishClassification(message.id, generation, result))
+        assertEquals(result, SmsStore(context).state.value.messages.single().classification)
+        assertEquals(message.id, SmsStore(context).state.value.messages.single().id)
     }
 
     @Test

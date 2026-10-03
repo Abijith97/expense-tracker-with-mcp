@@ -14,8 +14,8 @@ android {
         applicationId = "com.abijith.expensetracker"
         minSdk = 26
         targetSdk = 37
-        versionCode = 7
-        versionName = "0.6.0-direct-llm-classification"
+        versionCode = 9
+        versionName = "0.7.1-separate-api-keys"
 
         ndk {
             // Pixel 7a and 64-bit Windows-hosted Android emulators.

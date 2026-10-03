@@ -14,6 +14,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app/src/main/python"))
 import expenditure_classifier as classifier
+import llm_api
 from classifier_examples import EXPENDITURE_EXAMPLES, OTHER_EXAMPLES, PROMPT_EXAMPLES
 from orchestrator import classify_sms
 
@@ -83,7 +84,7 @@ class ExpenditureClassifierTests(unittest.TestCase):
                 self.assertEqual(caught.exception.code, code)
 
     def test_invalid_input_and_key_make_no_network_request(self):
-        with patch.object(classifier.urllib.request, "build_opener") as opener:
+        with patch.object(llm_api.urllib.request, "build_opener") as opener:
             for body in ("", " ", None, 1, "x" * (classifier.MAX_BODY_CHARS + 1)):
                 with self.subTest(body_type=type(body)):
                     with self.assertRaises(classifier.ClassificationError):
@@ -95,7 +96,7 @@ class ExpenditureClassifierTests(unittest.TestCase):
             opener.assert_not_called()
 
     def test_success_makes_one_https_request_with_safe_settings(self):
-        with patch.object(classifier.urllib.request, "build_opener") as factory:
+        with patch.object(llm_api.urllib.request, "build_opener") as factory:
             factory.return_value.open.return_value.__enter__.return_value.read.return_value = json.dumps(response_for(True)).encode()
             decision, elapsed = classifier.classify_expenditure("DEMO-BODY", "DEMO-KEY")
             self.assertIs(decision, True)
@@ -115,7 +116,7 @@ class ExpenditureClassifierTests(unittest.TestCase):
             (urllib.error.URLError("PRIVATE-DETAIL"), "network"),
             (urllib.error.URLError(socket.timeout()), "timeout")])
         for error, expected in cases:
-            with self.subTest(expected=expected), patch.object(classifier.urllib.request, "build_opener") as factory:
+            with self.subTest(expected=expected), patch.object(llm_api.urllib.request, "build_opener") as factory:
                 factory.return_value.open.side_effect = error
                 with self.assertRaises(classifier.ClassificationError) as caught:
                     classifier.classify_expenditure("DEMO-BODY", "DEMO-KEY")
@@ -123,8 +124,8 @@ class ExpenditureClassifierTests(unittest.TestCase):
                 factory.return_value.open.assert_called_once()
 
     def test_malformed_or_oversized_http_response_is_safe(self):
-        for raw in (b"PRIVATE-BROKEN-JSON", b"x" * (classifier.MAX_RESPONSE_BYTES + 1)):
-            with self.subTest(size=len(raw)), patch.object(classifier.urllib.request, "build_opener") as factory:
+        for raw in (b"PRIVATE-BROKEN-JSON", b"x" * (llm_api.MAX_RESPONSE_BYTES + 1)):
+            with self.subTest(size=len(raw)), patch.object(llm_api.urllib.request, "build_opener") as factory:
                 factory.return_value.open.return_value.__enter__.return_value.read.return_value = raw
                 with self.assertRaises(classifier.ClassificationError) as caught:
                     classifier.classify_expenditure("DEMO-BODY", "DEMO-KEY")
@@ -168,14 +169,14 @@ class ExpenditureClassifierTests(unittest.TestCase):
                                          "status": "failed", "error_code": "invalid_response"})
 
     def test_redirects_cannot_forward_body_or_key(self):
-        handler = classifier._NoRedirect()
+        handler = llm_api._NoRedirect()
         self.assertIsNone(handler.redirect_request(None, None, 302, "demo", {}, "https://example.invalid"))
 
     def test_sanitized_corpus_flow_with_stub_is_not_a_model_accuracy_test(self):
         # All 34 user-derived cases exercise the production request and parser.
         # The stub supplies the known label; this does NOT assess semantic accuracy.
         for body, label in tuple((text, True) for text in EXPENDITURE_EXAMPLES) + tuple((text, False) for text in OTHER_EXAMPLES):
-            with self.subTest(label=label), patch.object(classifier.urllib.request, "build_opener") as factory:
+            with self.subTest(label=label), patch.object(llm_api.urllib.request, "build_opener") as factory:
                 factory.return_value.open.return_value.__enter__.return_value.read.return_value = json.dumps(response_for(label)).encode()
                 result = json.loads(classify_sms(self.payload(body), "DEMO-KEY"))
                 self.assertIs(result["is_expenditure"], label)

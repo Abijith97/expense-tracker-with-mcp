@@ -106,8 +106,8 @@ class MainActivity : ComponentActivity() {
                                 )
                             },
                             onClear = { showClearConfirmation = true },
-                            onEnableCloud = { key, model, consent ->
-                                CloudClassificationSettings.enable(key, model, consent)
+                            onEnableCloud = { classificationKey, categoryKey, model, consent ->
+                                CloudClassificationSettings.enable(classificationKey, categoryKey, model, consent)
                             },
                             onDisableCloud = {
                                 CloudClassificationSettings.disable()
@@ -201,7 +201,7 @@ private fun SmsDebugScreen(
     onPause: () -> Unit,
     onSettings: () -> Unit,
     onClear: () -> Unit,
-    onEnableCloud: (String, String, Boolean) -> Boolean,
+    onEnableCloud: (String, String, String, Boolean) -> Boolean,
     onDisableCloud: () -> Unit,
     onClassify: (String) -> Unit,
 ) {
@@ -214,7 +214,7 @@ private fun SmsDebugScreen(
         ) {
             item {
                 Text("Finance Tracker", style = MaterialTheme.typography.headlineSmall)
-                Text("Milestone 6: direct LLM classification", style = MaterialTheme.typography.titleMedium)
+                Text("Milestone 7: category identification", style = MaterialTheme.typography.titleMedium)
             }
             item {
                 Text("While enabled, this app keeps the latest ${SmsStore.MAX_MESSAGES} incoming SMS messages " +

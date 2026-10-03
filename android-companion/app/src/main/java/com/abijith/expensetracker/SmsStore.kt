@@ -110,6 +110,16 @@ class SmsStore internal constructor(context: Context) {
         return if (save(current.copy(messages = current.messages.map { if (it.id == id) started else it }))) started else null
     }
 
+    /** Check before the second API call; pause, clear, or eviction must stop it. */
+    @Synchronized
+    fun canContinueClassification(id: String, generation: Long, attempt: String): Boolean {
+        val current = state.value
+        val message = current.messages.find { it.id == id } ?: return false
+        return current.enabled && current.generation == generation &&
+            message.classification?.attemptId == attempt &&
+            message.classification.status == ClassificationStatus.RUNNING
+    }
+
     @Synchronized
     fun finishClassification(id: String, generation: Long, result: SmsClassification): Boolean {
         val current = state.value

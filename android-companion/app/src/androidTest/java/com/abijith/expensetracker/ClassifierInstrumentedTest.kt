@@ -18,7 +18,7 @@ class ClassifierInstrumentedTest {
     fun missingApiKeyIsFailureNeverOtherAndMakesNoHttpRequest() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val result = PythonBridge.classifySms(context, message,
-            CloudCredentials("", DEFAULT_CLASSIFIER_MODEL, "demo-session"), "demo-attempt")
+            CloudCredentials("", "", DEFAULT_CLASSIFIER_MODEL, "demo-session"), "demo-attempt")
         assertEquals(ClassificationStatus.FAILED, result.status)
         assertEquals("configuration", result.errorCode)
         assertEquals("demo-attempt", result.attemptId)

@@ -39,7 +39,7 @@ object PythonBridge {
                 if (!Python.isStarted()) Python.start(AndroidPlatform(context.applicationContext))
             }
             val reply = Python.getInstance().getModule("orchestrator").callAttr(
-                "classify_sms", SmsPayload.encode(message), credentials.apiKey, credentials.model).toString()
+                "classify_sms", SmsPayload.encode(message), credentials.classificationApiKey, credentials.model).toString()
             val result = JSONObject(reply)
             require(result.getInt("schema_version") == 1)
             require(result.getString("message_id") == message.id)
@@ -55,9 +55,7 @@ object PythonBridge {
             } else {
                 require(status == "failed")
                 val code = result.getString("error_code")
-                val safeCode = code.takeIf { it in setOf("configuration", "authentication", "access_denied",
-                    "request_rejected", "rate_limit_or_quota", "service_unavailable", "timeout", "network",
-                    "invalid_input", "invalid_response", "incomplete_response", "refused") } ?: "processing"
+                val safeCode = safeInferenceCode(code)
                 SmsClassification(ClassificationStatus.FAILED, attemptId, credentials.model,
                     elapsedMs(startedAt), errorCode = safeCode)
             }
@@ -69,6 +67,44 @@ object PythonBridge {
                 elapsedMs(startedAt), errorCode = "processing")
         }
     }
+
+    /** Second worker-only stage. The caller must first establish Expenditure. */
+    fun identifyCategory(context: Context, message: CapturedSms,
+                         credentials: CloudCredentials): SmsCategory {
+        val startedAt = SystemClock.elapsedRealtimeNanos()
+        return try {
+            synchronized(this) {
+                if (!Python.isStarted()) Python.start(AndroidPlatform(context.applicationContext))
+            }
+            val reply = Python.getInstance().getModule("orchestrator").callAttr(
+                "identify_sms_category", SmsPayload.encode(message), credentials.categoryApiKey, credentials.model).toString()
+            val result = JSONObject(reply)
+            require(result.getInt("schema_version") == 1)
+            require(result.getString("message_id") == message.id)
+            if (result.getString("status") == "identified") {
+                require(result.get("category") is String)
+                val name = result.getString("category")
+                require(name in SPENDING_CATEGORIES)
+                val apiElapsedMs = result.getDouble("api_elapsed_ms")
+                require(apiElapsedMs.isFinite() && apiElapsedMs >= 0)
+                SmsCategory(CategoryStatus.IDENTIFIED, name, elapsedMs(startedAt), apiElapsedMs)
+            } else {
+                require(result.getString("status") == "failed")
+                SmsCategory(CategoryStatus.FAILED, elapsedMs = elapsedMs(startedAt),
+                    errorCode = safeInferenceCode(result.getString("error_code")))
+            }
+        } catch (_: Exception) {
+            SmsCategory(CategoryStatus.FAILED, elapsedMs = elapsedMs(startedAt), errorCode = "processing")
+        } catch (_: LinkageError) {
+            SmsCategory(CategoryStatus.FAILED, elapsedMs = elapsedMs(startedAt), errorCode = "processing")
+        }
+    }
+
+    private fun safeInferenceCode(code: String): String = code.takeIf {
+        it in setOf("configuration", "authentication", "access_denied", "request_rejected",
+            "rate_limit_or_quota", "service_unavailable", "timeout", "network", "invalid_input",
+            "invalid_response", "incomplete_response", "refused")
+    } ?: "processing"
 
     fun acknowledge(
         context: Context,

@@ -3,7 +3,9 @@
 SMS capture stays local and fast. A separate background entry point calls the
 hosted classifier directly after explicit cloud opt-in. Chat returns local help.
 The orchestrator controls a fixed workflow, not an autonomous LLM tool loop.
-Category extraction and finance storage come later; MCP is deferred to chatbot work.
+Category identification is a separate background entry point, called only after
+an expenditure result and renewed Android lifecycle/consent checks. Transaction
+extraction and finance storage come later; MCP is deferred to chatbot work.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ import platform
 from datetime import datetime, timezone
 from typing import Any
 from app_help import get_help
+from category_identifier import CategoryError, CATEGORIES, identify_category
 from expenditure_classifier import ClassificationError, DEFAULT_MODEL, classify_expenditure
 
 
@@ -93,6 +96,26 @@ def classify_sms(payload_json: str, api_key: str, model: str = DEFAULT_MODEL) ->
             raise ClassificationError("invalid_response")
         result.update(status="classified", is_expenditure=decision, api_elapsed_ms=elapsed)
     except ClassificationError as error:
+        result.update(status="failed", error_code=error.code)
+    return json.dumps(result)
+
+
+def identify_sms_category(payload_json: str, api_key: str, model: str = DEFAULT_MODEL) -> str:
+    """Category-only entry point; the Android worker gates this on expenditure.
+
+    Separate calls let Android recheck consent/permission between model stages.
+    Never keep Python open while waiting for human category confirmation.
+    """
+    receipt = json.loads(handle_sms(payload_json))
+    payload = json.loads(payload_json)
+    result = {"schema_version": 1, "message_id": receipt["message_id"]}
+    try:
+        category, elapsed = identify_category(payload["body"], api_key, model)
+        if (type(category) is not str or category not in CATEGORIES
+                or type(elapsed) not in (int, float) or not math.isfinite(elapsed) or elapsed < 0):
+            raise CategoryError("invalid_response")
+        result.update(status="identified", category=category, api_elapsed_ms=elapsed)
+    except CategoryError as error:
         result.update(status="failed", error_code=error.code)
     return json.dumps(result)
 

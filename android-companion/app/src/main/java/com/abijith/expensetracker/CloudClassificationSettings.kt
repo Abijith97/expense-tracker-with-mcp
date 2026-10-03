@@ -9,10 +9,15 @@ data class CloudClassificationState(val enabled: Boolean = false, val model: Str
 const val DEFAULT_CLASSIFIER_MODEL = "gpt-5.6-luna"
 
 // Deliberately not a data class: its toString must never reveal the key.
-class CloudCredentials(val apiKey: String, val model: String, val session: String)
+class CloudCredentials(
+    val classificationApiKey: String,
+    val categoryApiKey: String,
+    val model: String,
+    val session: String,
+)
 
-/** Personal POC: key and consent live only in this app process, never on disk.
- * Closing the screen is fine; a process restart requires entering the key again.
+/** Personal POC: both keys and consent live only in this app process, never on disk.
+ * Closing the screen is fine; a process restart requires entering both keys again.
  * A random session prevents work from a previous process being authorized later.
  */
 object CloudClassificationSettings {
@@ -21,12 +26,16 @@ object CloudClassificationSettings {
     val state: StateFlow<CloudClassificationState> = mutableState.asStateFlow()
 
     @Synchronized
-    fun enable(apiKey: String, model: String, consent: Boolean): Boolean {
-        val key = apiKey.trim()
+    fun enable(classificationApiKey: String, categoryApiKey: String, model: String, consent: Boolean): Boolean {
+        val classificationKey = classificationApiKey.trim()
+        val categoryKey = categoryApiKey.trim()
         val modelId = model.trim()
-        if (!consent || key.isBlank() || key.any { it.isWhitespace() } ||
+        // Require distinct credentials so provider-side key totals separate the stages.
+        // Do not validate remotely here: enabling must not incur an API call.
+        if (!consent || !validKey(classificationKey) || !validKey(categoryKey) ||
+            classificationKey == categoryKey ||
             modelId.isBlank() || modelId.length > 100) return false
-        credentials = CloudCredentials(key, modelId, UUID.randomUUID().toString())
+        credentials = CloudCredentials(classificationKey, categoryKey, modelId, UUID.randomUUID().toString())
         mutableState.value = CloudClassificationState(true, modelId)
         return true
     }
@@ -42,4 +51,6 @@ object CloudClassificationSettings {
 
     @Synchronized
     fun credentialsFor(session: String): CloudCredentials? = credentials?.takeIf { it.session == session }
+
+    private fun validKey(key: String): Boolean = key.isNotBlank() && key.none { it.isWhitespace() }
 }

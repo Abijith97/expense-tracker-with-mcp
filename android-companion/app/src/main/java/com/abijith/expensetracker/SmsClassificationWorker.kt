@@ -41,13 +41,24 @@ class SmsClassificationWorker(context: Context, parameters: WorkerParameters) : 
             return Result.failure()
         }
         val startedAt = SystemClock.elapsedRealtimeNanos()
-        val classification = PythonBridge.classifySms(applicationContext, message, credentials, attempt)
+        val expenditure = PythonBridge.classifySms(applicationContext, message, credentials, attempt)
+        // Keep lifecycle checks in Android, and prompt/inference in Python.
+        // In particular, do not start a second upload after consent is withdrawn.
+        val classification = withCategoryIfExpenditure(expenditure, canContinue = {
+            !isStopped && CloudClassificationSettings.credentialsFor(session) != null &&
+                ContextCompat.checkSelfPermission(applicationContext, Manifest.permission.RECEIVE_SMS) ==
+                    PackageManager.PERMISSION_GRANTED &&
+                store.canContinueClassification(id, generation, attempt)
+        }, identify = {
+            PythonBridge.identifyCategory(applicationContext, message, credentials)
+        }).copy(elapsedMs = elapsedMs(startedAt))
         if (!isStopped && CloudClassificationSettings.credentialsFor(session) != null) {
             val applied = store.finishClassification(id, generation, classification)
             Log.i("SmsClassification", "status=${classification.status} elapsed_ms=${elapsedMs(startedAt)} applied=$applied")
         }
         // No API retries here: failures stay visible, rather than counting as 'Other'.
-        return if (classification.status == ClassificationStatus.FAILED) Result.failure() else Result.success()
+        return if (classification.status == ClassificationStatus.FAILED ||
+            classification.category?.status == CategoryStatus.FAILED) Result.failure() else Result.success()
     }
 
     companion object {

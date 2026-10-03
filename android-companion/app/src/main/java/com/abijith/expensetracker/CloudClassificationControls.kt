@@ -25,10 +25,11 @@ import java.util.Locale
 
 @Composable
 fun CloudClassificationControls(state: CloudClassificationState,
-                                onEnable: (String, String, Boolean) -> Boolean,
+                                onEnable: (String, String, String, Boolean) -> Boolean,
                                 onDisable: () -> Unit) {
     // Never use rememberSaveable for secrets: no key in Android saved state.
-    var apiKey by remember { mutableStateOf("") }
+    var classificationApiKey by remember { mutableStateOf("") }
+    var categoryApiKey by remember { mutableStateOf("") }
     var model by remember { mutableStateOf(state.model) }
     var consent by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf(false) }
@@ -36,8 +37,8 @@ fun CloudClassificationControls(state: CloudClassificationState,
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Cloud expenditure classification", style = MaterialTheme.typography.titleMedium)
             Text("Cloud: ${if (state.enabled) "Enabled for this app process" else "Off"}")
-            Text("Personal POC only. Your key stays in phone memory, not the APK, source code, " +
-                "logs, or disk. Re-enter it after Android ends the process. A distributed app " +
+            Text("Personal POC only. Your keys stay in phone memory, not the APK, source code, " +
+                "logs, or disk. Re-enter both after Android ends the process. A distributed app " +
                 "must use a backend to protect API keys.", style = MaterialTheme.typography.bodySmall)
             if (state.enabled) {
                 Text("Model: ${state.model}")
@@ -45,16 +46,26 @@ fun CloudClassificationControls(state: CloudClassificationState,
                     Text("Disable cloud classification")
                 }
             } else {
-                OutlinedTextField(value = apiKey, onValueChange = { apiKey = it; error = false },
-                    label = { Text("OpenAI API key") }, singleLine = true,
+                OutlinedTextField(value = classificationApiKey,
+                    onValueChange = { classificationApiKey = it; error = false },
+                    label = { Text("Financial classification API key") }, singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
-                    modifier = Modifier.fillMaxWidth().testTag("cloud_key"))
+                    modifier = Modifier.fillMaxWidth().testTag("cloud_classification_key"))
+                OutlinedTextField(value = categoryApiKey,
+                    onValueChange = { categoryApiKey = it; error = false },
+                    label = { Text("Category identification API key") }, singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth().testTag("cloud_category_key"))
+                Text("Use two different keys dedicated to these functions to separate OpenAI-reported " +
+                    "costs. This app does not display billing totals.",
+                    style = MaterialTheme.typography.bodySmall)
                 OutlinedTextField(value = model, onValueChange = { model = it },
                     label = { Text("Model ID") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Row {
                     Checkbox(checked = consent, onCheckedChange = { consent = it },
                         modifier = Modifier.testTag("cloud_consent"))
                     Text("I agree to send captured SMS bodies to OpenAI for classification. " +
+                        "Expenditures get a second upload for category identification. " +
                         "This includes non-financial messages and may incur API charges.")
                 }
                 Text("Sender and message ID are not uploaded, but the body can contain personal " +
@@ -62,11 +73,13 @@ fun CloudClassificationControls(state: CloudClassificationState,
                     "Use synthetic SMS for the demo. Enabling does not upload existing history.",
                     style = MaterialTheme.typography.bodySmall)
                 Button(onClick = {
-                    error = !onEnable(apiKey, model, consent)
-                    if (!error) { apiKey = ""; consent = false }
-                }, enabled = apiKey.isNotBlank() && model.isNotBlank() && consent,
+                    error = !onEnable(classificationApiKey, categoryApiKey, model, consent)
+                    if (!error) { classificationApiKey = ""; categoryApiKey = ""; consent = false }
+                }, enabled = classificationApiKey.isNotBlank() && categoryApiKey.isNotBlank() &&
+                    classificationApiKey.trim() != categoryApiKey.trim() && model.isNotBlank() && consent,
                     modifier = Modifier.testTag("cloud_enable")) { Text("Enable cloud classification") }
-                if (error) Text("Check the key, model, and consent.", color = MaterialTheme.colorScheme.error)
+                if (error) Text("Enter two different keys without internal whitespace, a model, and consent.",
+                    color = MaterialTheme.colorScheme.error)
             }
             Text("Pausing capture or disabling cloud stops pending work. A request already sent " +
                 "cannot be recalled. No expenses are recorded in this milestone.",
@@ -80,7 +93,7 @@ fun SmsClassificationDetails(classification: SmsClassification?, canClassify: Bo
     val label = when (classification?.status) {
         null -> "Not classified"
         ClassificationStatus.WAITING -> "Waiting for background work / internet"
-        ClassificationStatus.RUNNING -> "Classifying with hosted LLM"
+        ClassificationStatus.RUNNING -> "Checking expenditure / identifying category with hosted LLM"
         ClassificationStatus.EXPENDITURE -> "Expenditure (true)"
         ClassificationStatus.OTHER -> "Other (false)"
         ClassificationStatus.FAILED -> "Failed - ${classificationFailureMessage(classification.errorCode)}"
@@ -89,10 +102,29 @@ fun SmsClassificationDetails(classification: SmsClassification?, canClassify: Bo
     Text("Classification: $label", style = MaterialTheme.typography.titleSmall)
     Text("Classification runs through the Python orchestrator.", style = MaterialTheme.typography.bodySmall)
     classification?.elapsedMs?.let {
-        Text("Classification processing: ${String.format(Locale.US, "%.3f", it)} ms")
+        Text("Total analysis processing: ${String.format(Locale.US, "%.3f", it)} ms")
     }
     classification?.apiElapsedMs?.let {
-        Text("Hosted API round trip and validation: ${String.format(Locale.US, "%.3f", it)} ms")
+        Text("Expenditure API round trip and validation: ${String.format(Locale.US, "%.3f", it)} ms")
+    }
+    if (classification?.status == ClassificationStatus.EXPENDITURE) {
+        val category = classification.category
+        val categoryLabel = when (category?.status) {
+            null -> "Not identified (older result)"
+            CategoryStatus.IDENTIFIED -> if (category.name == "Not sure") "Not sure - needs review"
+                else "${category.name} (suggested, not confirmed)"
+            CategoryStatus.FAILED -> "Failed - ${classificationFailureMessage(category.errorCode)}"
+            CategoryStatus.INTERRUPTED -> "Interrupted - you can retry manually"
+        }
+        Text("Category: $categoryLabel", style = MaterialTheme.typography.titleSmall)
+        category?.elapsedMs?.let {
+            Text("Category processing: ${String.format(Locale.US, "%.3f", it)} ms")
+        }
+        category?.apiElapsedMs?.let {
+            Text("Category API round trip and validation: ${String.format(Locale.US, "%.3f", it)} ms")
+        }
+    } else if (classification?.status == ClassificationStatus.OTHER) {
+        Text("Category: Skipped (not an expenditure)")
     }
     if (canClassify && classification?.status !in setOf(ClassificationStatus.WAITING, ClassificationStatus.RUNNING)) {
         OutlinedButton(onClick = onClassify) {

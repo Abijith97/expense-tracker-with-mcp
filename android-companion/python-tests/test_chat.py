@@ -21,7 +21,7 @@ class ChatHandoffTests(unittest.TestCase):
 
     def test_chat_returns_correlated_help_without_echoing_input(self):
         # Built-in help must remain offline even when cloud classification exists.
-        with patch("expenditure_classifier.urllib.request.build_opener") as opener:
+        with patch("llm_api.urllib.request.build_opener") as opener:
             result = json.loads(handle_chat(json.dumps(self.payload)))
             opener.assert_not_called()
         self.assertEqual(result["message_id"], "demo-chat-001")
@@ -29,6 +29,7 @@ class ChatHandoffTests(unittest.TestCase):
         self.assertEqual(result["status"], "capabilities")
         self.assertIn("SMS capture tab", result["reply"])
         self.assertIn("not available yet", result["reply"])
+        self.assertIn("two distinct OpenAI API keys", result["reply"])
         self.assertNotIn("DEMO-PRIVATE-QUERY", json.dumps(result))
         self.assertEqual(set(result), {
             "schema_version", "message_id", "status", "reply", "processed_at_utc",
