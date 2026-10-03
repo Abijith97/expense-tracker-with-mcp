@@ -9,6 +9,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
+import java.util.UUID
 
 /** A diagnostic copy, not a record in Android's SMS inbox or the finance database. */
 data class CapturedSms(
@@ -18,6 +19,7 @@ data class CapturedSms(
     val sentAtMillis: Long,
     val receivedAtMillis: Long,
     val pythonHandoff: PythonHandoff? = null,
+    val classification: SmsClassification? = null,
 )
 
 data class SmsCaptureState(
@@ -32,7 +34,7 @@ data class SmsCaptureState(
  * AtomicFile avoids half-written JSON; noBackupFilesDir excludes these copies
  * from Android backup/transfer. No SMS content is written to logs.
  */
-class SmsStore private constructor(context: Context) {
+class SmsStore internal constructor(context: Context) {
     private val file = AtomicFile(File(context.noBackupFilesDir, "sms_capture.json"))
     private val mutableState = MutableStateFlow(readFromDisk())
     val state: StateFlow<SmsCaptureState> = mutableState.asStateFlow()
@@ -48,9 +50,10 @@ class SmsStore private constructor(context: Context) {
             messages = if (enabled) current.messages else current.messages.map { message ->
                 // An already-running Python call cannot be killed safely. Pausing
                 // discards its eventual result and leaves no misleading Pending card.
-                if (message.pythonHandoff?.status == HandoffStatus.PENDING) {
+                val interrupted = if (message.pythonHandoff?.status == HandoffStatus.PENDING) {
                     message.copy(pythonHandoff = PythonHandoff(HandoffStatus.INTERRUPTED))
                 } else message
+                interruptClassification(interrupted)
             },
         ))
     }
@@ -83,6 +86,52 @@ class SmsStore private constructor(context: Context) {
         }))
     }
 
+    /** An explicit call schedules a new attempt; pending work is not duplicated. */
+    @Synchronized
+    fun prepareClassification(id: String, generation: Long, model: String): SmsClassification? {
+        val current = state.value
+        val message = current.messages.find { it.id == id } ?: return null
+        if (!current.enabled || current.generation != generation ||
+            message.classification?.status in setOf(ClassificationStatus.WAITING, ClassificationStatus.RUNNING)) return null
+        val pending = SmsClassification(ClassificationStatus.WAITING, UUID.randomUUID().toString(), model)
+        return if (save(current.copy(messages = current.messages.map {
+            if (it.id == id) it.copy(classification = pending) else it
+        }))) pending else null
+    }
+
+    @Synchronized
+    fun startClassification(id: String, generation: Long, attempt: String): CapturedSms? {
+        val current = state.value
+        val message = current.messages.find { it.id == id } ?: return null
+        if (!current.enabled || current.generation != generation ||
+            message.classification?.attemptId != attempt ||
+            message.classification.status != ClassificationStatus.WAITING) return null
+        val started = message.copy(classification = message.classification.copy(status = ClassificationStatus.RUNNING))
+        return if (save(current.copy(messages = current.messages.map { if (it.id == id) started else it }))) started else null
+    }
+
+    @Synchronized
+    fun finishClassification(id: String, generation: Long, result: SmsClassification): Boolean {
+        val current = state.value
+        val message = current.messages.find { it.id == id } ?: return false
+        if (!current.enabled || current.generation != generation ||
+            message.classification?.attemptId != result.attemptId ||
+            message.classification.status !in setOf(ClassificationStatus.WAITING, ClassificationStatus.RUNNING)) return false
+        return save(current.copy(messages = current.messages.map {
+            if (it.id == id) it.copy(classification = result) else it
+        }))
+    }
+
+    @Synchronized
+    fun interruptClassifications(): Boolean = save(state.value.copy(
+        messages = state.value.messages.map(::interruptClassification),
+    ))
+
+    private fun interruptClassification(message: CapturedSms): CapturedSms =
+        if (message.classification?.status in setOf(ClassificationStatus.WAITING, ClassificationStatus.RUNNING)) {
+            message.copy(classification = message.classification?.copy(status = ClassificationStatus.INTERRUPTED))
+        } else message
+
     @Synchronized
     fun clear(): Boolean = save(
         state.value.copy(
@@ -109,6 +158,7 @@ class SmsStore private constructor(context: Context) {
                         body = item.getString("body"),
                         sentAtMillis = item.getLong("sentAtMillis"),
                         receivedAtMillis = item.getLong("receivedAtMillis"),
+                        classification = item.optJSONObject("classification")?.let(SmsClassification::fromJson),
                         pythonHandoff = item.optJSONObject("python_handoff")?.let { handoff ->
                             val status = HandoffStatus.valueOf(handoff.getString("status"))
                             if (status == HandoffStatus.PENDING) {
@@ -122,6 +172,9 @@ class SmsStore private constructor(context: Context) {
                                         handoff.getString("acknowledgement") else null,
                                     elapsedMillis = if (handoff.has("elapsed_millis"))
                                         handoff.getLong("elapsed_millis") else null,
+                                    performance = handoff.optJSONObject("performance")?.let {
+                                        SmsPerformance.fromJson(it)
+                                    },
                                 )
                             }
                         },
@@ -145,10 +198,12 @@ class SmsStore private constructor(context: Context) {
                         .put("body", message.body)
                         .put("sentAtMillis", message.sentAtMillis)
                         .put("receivedAtMillis", message.receivedAtMillis)
+                message.classification?.let { item.put("classification", it.toJson()) }
                 message.pythonHandoff?.let { handoff ->
                     val result = JSONObject().put("status", handoff.status.name)
                     handoff.acknowledgement?.let { result.put("acknowledgement", it) }
                     handoff.elapsedMillis?.let { result.put("elapsed_millis", it) }
+                    handoff.performance?.let { result.put("performance", it.toJson()) }
                     item.put("python_handoff", result)
                 }
                 messages.put(item)
@@ -169,9 +224,10 @@ class SmsStore private constructor(context: Context) {
                 enabled = false,
                 generation = state.value.generation + 1,
                 messages = state.value.messages.map { message ->
-                    if (message.pythonHandoff?.status == HandoffStatus.PENDING) {
+                    val interrupted = if (message.pythonHandoff?.status == HandoffStatus.PENDING) {
                         message.copy(pythonHandoff = PythonHandoff(HandoffStatus.INTERRUPTED))
                     } else message
+                    interruptClassification(interrupted)
                 },
                 error = "Could not save local capture state. Revoke SMS permission in app settings " +
                     "to stop capture across restarts, then clear history and try again.",

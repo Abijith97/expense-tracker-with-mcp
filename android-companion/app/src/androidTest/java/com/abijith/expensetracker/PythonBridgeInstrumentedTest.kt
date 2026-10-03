@@ -53,6 +53,15 @@ class PythonBridgeInstrumentedTest {
         assertFalse(handoff.acknowledgement!!.contains(sms.body))
         assertNotNull(handoff.elapsedMillis)
         assertTrue(handoff.elapsedMillis!! >= 0L)
+        val performance = handoff.performance!!
+        assertTrue(performance.jsonEncodeMs!! >= 0.0)
+        assertTrue(performance.pythonSetupMs!! >= 0.0)
+        assertTrue(performance.pythonCallMs!! >= 0.0)
+        assertTrue(performance.receiptValidationMs!! >= 0.0)
+        assertTrue(performance.bridgeTotalMs >= performance.jsonEncodeMs!!)
+        // A synthetic bridge call cannot measure real SMS reception.
+        assertNull(performance.receiverToJsonReadyMs)
+        assertNull(performance.smsTimestampToReceiverMs)
         // This can include runtime startup; order of test methods is unspecified.
         Log.i("PythonBridgeTest", "Acknowledged handoff: ${handoff.elapsedMillis} ms")
     }

@@ -43,6 +43,7 @@ import androidx.lifecycle.ViewModelProvider
 import com.abijith.expensetracker.ui.theme.FinanceTrackerCompanionTheme
 import java.text.DateFormat
 import java.util.Date
+import java.util.Locale
 
 /** App chat and SMS diagnostics. The receiver also works while the screen is closed. */
 class MainActivity : ComponentActivity() {
@@ -73,6 +74,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             val captureState by store.state.collectAsState()
             val chatState by chat.state.collectAsState()
+            val cloudState by CloudClassificationSettings.state.collectAsState()
             var selectedTab by rememberSaveable { mutableStateOf(0) }
             FinanceTrackerCompanionTheme {
                 Column(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
@@ -87,11 +89,13 @@ class MainActivity : ComponentActivity() {
                     } else {
                         SmsDebugScreen(
                             state = captureState,
+                            cloudState = cloudState,
                             permissionGranted = permissionGranted,
                             notice = notice,
                             onEnable = ::enableCapture,
                             onPause = {
                                 if (store.setEnabled(false)) {
+                                    SmsClassificationWorker.cancelAll(this@MainActivity)
                                     notice = "Capture paused. Existing diagnostic copies remain until cleared."
                                 }
                             },
@@ -102,6 +106,16 @@ class MainActivity : ComponentActivity() {
                                 )
                             },
                             onClear = { showClearConfirmation = true },
+                            onEnableCloud = { key, model, consent ->
+                                CloudClassificationSettings.enable(key, model, consent)
+                            },
+                            onDisableCloud = {
+                                CloudClassificationSettings.disable()
+                                SmsClassificationWorker.cancelAll(this@MainActivity)
+                            },
+                            onClassify = { id -> store.activeGeneration()?.let {
+                                SmsClassificationWorker.enqueue(this@MainActivity, id, it)
+                            } },
                         )
                     }
                 }
@@ -113,7 +127,8 @@ class MainActivity : ComponentActivity() {
                         text = {
                             Text("SMS permission lets this POC display new messages on this phone. " +
                                 "It captures all new SMS while enabled, not only financial messages. " +
-                                "Nothing is uploaded or sent. You can pause capture at any time.")
+                                "Capture alone stays local. Cloud classification is a separate " +
+                                "opt-in that uploads SMS bodies to OpenAI. You can pause at any time.")
                         },
                         confirmButton = {
                             TextButton(onClick = {
@@ -135,7 +150,10 @@ class MainActivity : ComponentActivity() {
                         confirmButton = {
                             TextButton(onClick = {
                                 showClearConfirmation = false
-                                if (store.clear()) notice = "Captured copies cleared. Your SMS inbox is unchanged."
+                                if (store.clear()) {
+                                    SmsClassificationWorker.cancelAll(this@MainActivity)
+                                    notice = "Captured copies cleared. Your SMS inbox is unchanged."
+                                }
                             }) { Text("Clear copies") }
                         },
                         dismissButton = {
@@ -151,7 +169,10 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         // Permissions can be revoked in Settings while this screen is away.
         permissionGranted = hasSmsPermission()
-        if (!permissionGranted) store.setEnabled(false)
+        if (!permissionGranted) {
+            store.setEnabled(false)
+            SmsClassificationWorker.cancelAll(this)
+        }
     }
 
     private fun hasSmsPermission(): Boolean =
@@ -173,12 +194,16 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun SmsDebugScreen(
     state: SmsCaptureState,
+    cloudState: CloudClassificationState,
     permissionGranted: Boolean,
     notice: String?,
     onEnable: () -> Unit,
     onPause: () -> Unit,
     onSettings: () -> Unit,
     onClear: () -> Unit,
+    onEnableCloud: (String, String, Boolean) -> Boolean,
+    onDisableCloud: () -> Unit,
+    onClassify: (String) -> Unit,
 ) {
     val capturing = permissionGranted && state.enabled
     Scaffold(modifier = Modifier.fillMaxSize(), contentWindowInsets = WindowInsets(0, 0, 0, 0)) { innerPadding ->
@@ -189,13 +214,14 @@ private fun SmsDebugScreen(
         ) {
             item {
                 Text("Finance Tracker", style = MaterialTheme.typography.headlineSmall)
-                Text("Milestone 2: on-phone Python handoff", style = MaterialTheme.typography.titleMedium)
+                Text("Milestone 4: expenditure classification", style = MaterialTheme.typography.titleMedium)
             }
             item {
                 Text("While enabled, this app keeps the latest ${SmsStore.MAX_MESSAGES} incoming SMS messages " +
                     "on this phone, including non-financial messages. Use synthetic messages for testing. " +
                     "Python acknowledges each new capture inside this APK. " +
-                    "No internet access or AI processing is included in this build.")
+                    "Optional hosted classification identifies completed outgoing payments; " +
+                    "it does not yet record expenses or identify spending categories.")
             }
             item {
                 Text("SMS permission: ${if (permissionGranted) "Granted" else "Not granted"}")
@@ -232,6 +258,7 @@ private fun SmsDebugScreen(
                     "Backgrounding is supported; Force Stop prevents receipt until you reopen the app.",
                     style = MaterialTheme.typography.bodySmall)
             }
+            item { CloudClassificationControls(cloudState, onEnableCloud, onDisableCloud) }
             if (state.messages.isEmpty()) {
                 item { Text("No captured messages yet. Enable capture, then send an ordinary SMS to this phone.") }
             }
@@ -242,6 +269,9 @@ private fun SmsDebugScreen(
                         Text("SMS timestamp: ${formatTimestamp(message.sentAtMillis)}", style = MaterialTheme.typography.bodySmall)
                         Text("Captured locally: ${formatTimestamp(message.receivedAtMillis)}", style = MaterialTheme.typography.bodySmall)
                         Text(message.body)
+                        SmsClassificationDetails(message.classification,
+                            canClassify = capturing && cloudState.enabled,
+                            onClassify = { onClassify(message.id) })
                         PythonHandoffDetails(message.pythonHandoff)
                     }
                 }
@@ -261,11 +291,42 @@ private fun PythonHandoffDetails(handoff: PythonHandoff?) {
     }
     Text("Python: $status", style = MaterialTheme.typography.titleSmall)
     handoff?.elapsedMillis?.let { elapsed ->
-        Text("Handoff time: $elapsed ms (includes Python startup on the first call)",
+        val display = handoff.performance?.bridgeTotalMs?.let { String.format(Locale.US, "%.3f", it) }
+            ?: elapsed.toString()
+        Text("Handoff time: $display ms (includes bridge wait and Python startup when needed)",
             style = MaterialTheme.typography.bodySmall)
     }
+    handoff?.performance?.let { SmsPerformanceDetails(it) }
     handoff?.acknowledgement?.let { acknowledgement ->
         Text(acknowledgement, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+@Composable
+private fun SmsPerformanceDetails(performance: SmsPerformance) {
+    Text("Processing timings", style = MaterialTheme.typography.titleSmall)
+    val stages = listOf(
+        "App entry to JSON ready" to performance.receiverToJsonReadyMs,
+        "JSON conversion for Python" to performance.jsonEncodeMs,
+        "Receiver setup" to performance.receiverSetupMs,
+        "Executor wait" to performance.executorWaitMs,
+        "Message preparation" to performance.messagePreparationMs,
+        "Initial save" to performance.initialSaveMs,
+        "Bridge wait" to performance.bridgeWaitMs,
+        "Python setup" to performance.pythonSetupMs,
+        "Python call" to performance.pythonCallMs,
+        "Receipt validation" to performance.receiptValidationMs,
+        "App entry to handoff result" to performance.receiverToHandoffMs,
+    )
+    stages.forEach { (label, duration) -> duration?.let {
+        Text("$label: ${String.format(Locale.US, "%.3f", it)} ms",
+            style = MaterialTheme.typography.bodySmall)
+    } }
+    Text("Python started in this call: ${performance.runtimeStarted}",
+        style = MaterialTheme.typography.bodySmall)
+    performance.smsTimestampToReceiverMs?.let {
+        Text("SMS timestamp to app entry: $it ms (delivery/clock estimate, not app-only detection)",
+            style = MaterialTheme.typography.bodySmall)
     }
 }
 

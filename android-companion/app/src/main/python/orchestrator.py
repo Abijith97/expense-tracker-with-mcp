@@ -1,9 +1,8 @@
 """Receive SMS and chat messages from the Android application.
 
-This is the lightweight entry point for the future phone-side orchestrator.
-It currently validates the handoff only; it does not run an AI agent, decide
-whether a message is financial, or record an expense. Chat returns built-in
-capability information until an LLM and phone-side MCP tools are integrated.
+SMS capture stays local and fast. A separate background entry point calls the
+hosted expenditure classifier after explicit cloud opt-in. Chat still returns
+built-in help; category extraction, MCP tools, and finance storage come later.
 """
 
 from __future__ import annotations
@@ -12,6 +11,7 @@ import json
 import platform
 from datetime import datetime, timezone
 from typing import Any
+from expenditure_classifier import ClassificationError, DEFAULT_MODEL, classify_expenditure
 
 
 def _is_nonnegative_int(value: Any) -> bool:
@@ -72,6 +72,23 @@ def handle_sms(payload_json: str) -> str:
     return json.dumps(receipt)
 
 
+def classify_sms(payload_json: str, api_key: str, model: str = DEFAULT_MODEL) -> str:
+    """Background-only cloud path. Failure is distinct from an 'other' decision.
+
+    Validate the same contract as capture; only the body is passed to the API.
+    The API key is a separate in-memory argument, never part of the SMS payload.
+    """
+    receipt = json.loads(handle_sms(payload_json))
+    payload = json.loads(payload_json)
+    result = {"schema_version": 1, "message_id": receipt["message_id"]}
+    try:
+        decision, api_elapsed_ms = classify_expenditure(payload["body"], api_key, model)
+        result.update(status="classified", is_expenditure=decision, api_elapsed_ms=api_elapsed_ms)
+    except ClassificationError as error:
+        result.update(status="failed", error_code=error.code)
+    return json.dumps(result)
+
+
 def handle_chat(payload_json: str) -> str:
     """Return local help through the same embedded Python runtime as SMS capture.
 
@@ -108,8 +125,11 @@ def handle_chat(payload_json: str) -> str:
             "Your message reached the phone-side Python orchestrator.\n\n"
             "This build provides built-in help and captures new SMS after you "
             "enable access in the SMS capture tab. Captured messages get a "
-            "Python acknowledgement.\n\n"
-            "Expense classification, category confirmation, recording expenses, "
+            "Python acknowledgement. Enable cloud classification in SMS capture "
+            "with your own OpenAI API key and consent to classify new messages "
+            "as Expenditure or Other. Classification uploads the SMS body and "
+            "may incur API charges.\n\n"
+            "Category confirmation, recording expenses, "
             "and spending summaries are planned. They are not available yet. "
             "For now, every chat message returns this help information."
         ),
