@@ -1,19 +1,20 @@
 """Receive SMS and chat messages from the Android application.
 
 SMS capture stays local and fast. A separate background entry point calls the
-phone MCP classification tool after explicit cloud opt-in. Chat calls the local
-MCP help tool. The workflow selects tools in code, not in an autonomous LLM loop.
-Category extraction and finance storage come later.
+hosted classifier directly after explicit cloud opt-in. Chat returns local help.
+The orchestrator controls a fixed workflow, not an autonomous LLM tool loop.
+Category extraction and finance storage come later; MCP is deferred to chatbot work.
 """
 
 from __future__ import annotations
 
 import json
+import math
 import platform
 from datetime import datetime, timezone
 from typing import Any
-from expenditure_classifier import DEFAULT_MODEL
-from phone_mcp_client import McpToolError, call_phone_tool
+from app_help import get_help
+from expenditure_classifier import ClassificationError, DEFAULT_MODEL, classify_expenditure
 
 
 def _is_nonnegative_int(value: Any) -> bool:
@@ -84,9 +85,14 @@ def classify_sms(payload_json: str, api_key: str, model: str = DEFAULT_MODEL) ->
     payload = json.loads(payload_json)
     result = {"schema_version": 1, "message_id": receipt["message_id"]}
     try:
-        classification = call_phone_tool("classify_financial_message", {"body": payload["body"]}, api_key, model)
-        result.update(status="classified", **classification)
-    except McpToolError as error:
+        decision, elapsed = classify_expenditure(payload["body"], api_key, model)
+        # Preserve the Android output contract without a tool-protocol layer.
+        # Truthy strings and invalid timing values must never become decisions.
+        if (type(decision) is not bool or type(elapsed) not in (int, float)
+                or not math.isfinite(elapsed) or elapsed < 0):
+            raise ClassificationError("invalid_response")
+        result.update(status="classified", is_expenditure=decision, api_elapsed_ms=elapsed)
+    except ClassificationError as error:
         result.update(status="failed", error_code=error.code)
     return json.dumps(result)
 
@@ -96,8 +102,8 @@ def handle_chat(payload_json: str) -> str:
 
     Every valid message currently receives capability information. This proves
     the chat handoff without pretending to interpret spending queries. It uses
-    the get_help MCP tool, but no LLM, network, or finance database. It does not
-    echo the input or send the chat body to a tool or hosted model.
+    a direct local help function, but no LLM, network, or finance database. It does
+    not echo the input or send the chat body to a hosted model.
     """
     invalid_payload = "Invalid chat handoff payload."
     if not isinstance(payload_json, str):
@@ -124,6 +130,6 @@ def handle_chat(payload_json: str) -> str:
         "schema_version": 1,
         "message_id": message_id,
         "status": "capabilities",
-        "reply": call_phone_tool("get_help", {})["reply"],
+        "reply": get_help(),
         "processed_at_utc": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
     })

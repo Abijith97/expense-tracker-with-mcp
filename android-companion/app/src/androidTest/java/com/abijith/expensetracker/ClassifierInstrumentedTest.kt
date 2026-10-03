@@ -49,38 +49,4 @@ class ClassifierInstrumentedTest {
             SmsClassification.fromJson(result.copy(status = ClassificationStatus.RUNNING).toJson()).status)
     }
 
-    @Test
-    fun packagedMcpServerInitializesListsToolsAndCallsHelp() {
-        val context = InstrumentationRegistry.getInstrumentation().targetContext
-        PythonBridge.acknowledge(context, message)
-        val server = Python.getInstance().getModule("phone_mcp_server").callAttr("PhoneMcpServer")
-        try {
-            val init = """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"Android test","version":"1"}}}"""
-            assertEquals("2025-11-25", JSONObject(server.callAttr("exchange", init).toString())
-                .getJSONObject("result").getString("protocolVersion"))
-            server.callAttr("exchange", """{"jsonrpc":"2.0","method":"notifications/initialized"}""")
-            val listed = JSONObject(server.callAttr("exchange",
-                """{"jsonrpc":"2.0","id":2,"method":"tools/list"}""").toString())
-                .getJSONObject("result").getJSONArray("tools")
-            assertEquals(setOf("get_help", "classify_financial_message"),
-                (0 until listed.length()).map { listed.getJSONObject(it).getString("name") }.toSet())
-            val help = JSONObject(server.callAttr("exchange",
-                """{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_help","arguments":{}}}""").toString())
-                .getJSONObject("result")
-            assertFalse(help.getBoolean("isError"))
-            assertTrue(help.getJSONObject("structuredContent").getString("reply").contains("get_help MCP tool"))
-        } finally {
-            server.callAttr("close")
-        }
-    }
-
-    @Test
-    fun packagedMcpClientReturnsOfflineHelpWithoutCloudCredentials() {
-        val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val reply = PythonBridge.replyToChat(context, "demo-mcp-chat", "DEMO-PRIVATE-QUERY")
-        assertTrue(reply.succeeded)
-        assertTrue(reply.reply.contains("get_help MCP tool"))
-        assertTrue(reply.reply.contains("classify_financial_message MCP tool"))
-        assertFalse(reply.reply.contains("DEMO-PRIVATE-QUERY"))
-    }
 }

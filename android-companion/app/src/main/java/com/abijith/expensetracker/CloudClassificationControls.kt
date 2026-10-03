@@ -87,7 +87,7 @@ fun SmsClassificationDetails(classification: SmsClassification?, canClassify: Bo
         ClassificationStatus.INTERRUPTED -> "Interrupted - you can retry manually"
     }
     Text("Classification: $label", style = MaterialTheme.typography.titleSmall)
-    Text("MCP tool: classify_financial_message", style = MaterialTheme.typography.bodySmall)
+    Text("Classification runs through the Python orchestrator.", style = MaterialTheme.typography.bodySmall)
     classification?.elapsedMs?.let {
         Text("Classification processing: ${String.format(Locale.US, "%.3f", it)} ms")
     }

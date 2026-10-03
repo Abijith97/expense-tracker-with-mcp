@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import sys
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app/src/main/python"))
 from orchestrator import handle_chat
@@ -19,7 +20,10 @@ class ChatHandoffTests(unittest.TestCase):
         }
 
     def test_chat_returns_correlated_help_without_echoing_input(self):
-        result = json.loads(handle_chat(json.dumps(self.payload)))
+        # Built-in help must remain offline even when cloud classification exists.
+        with patch("expenditure_classifier.urllib.request.build_opener") as opener:
+            result = json.loads(handle_chat(json.dumps(self.payload)))
+            opener.assert_not_called()
         self.assertEqual(result["message_id"], "demo-chat-001")
         self.assertEqual(result["schema_version"], 1)
         self.assertEqual(result["status"], "capabilities")

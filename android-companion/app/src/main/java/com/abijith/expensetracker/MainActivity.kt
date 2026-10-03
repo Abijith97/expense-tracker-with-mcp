@@ -214,7 +214,7 @@ private fun SmsDebugScreen(
         ) {
             item {
                 Text("Finance Tracker", style = MaterialTheme.typography.headlineSmall)
-                Text("Milestone 5: phone-side MCP tools", style = MaterialTheme.typography.titleMedium)
+                Text("Milestone 6: direct LLM classification", style = MaterialTheme.typography.titleMedium)
             }
             item {
                 Text("While enabled, this app keeps the latest ${SmsStore.MAX_MESSAGES} incoming SMS messages " +

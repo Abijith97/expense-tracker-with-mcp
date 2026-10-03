@@ -132,7 +132,7 @@ class ExpenditureClassifierTests(unittest.TestCase):
 
     def test_sms_orchestration_preserves_boolean_and_omits_private_data(self):
         for decision in (True, False):
-            with self.subTest(decision=decision), patch("phone_tools.classify_expenditure", return_value=(decision, 12.5)) as call:
+            with self.subTest(decision=decision), patch("orchestrator.classify_expenditure", return_value=(decision, 12.5)) as call:
                 result = json.loads(classify_sms(self.payload(), "DEMO-KEY"))
                 self.assertEqual(result["status"], "classified")
                 self.assertIs(result["is_expenditure"], decision)
@@ -144,17 +144,28 @@ class ExpenditureClassifierTests(unittest.TestCase):
                 self.assertNotIn("Sent Rs", json.dumps(result))
 
     def test_sms_orchestration_failure_has_no_false_decision(self):
-        with patch("phone_tools.classify_expenditure", side_effect=classifier.ClassificationError("authentication")):
+        with patch("orchestrator.classify_expenditure", side_effect=classifier.ClassificationError("authentication")):
             result = json.loads(classify_sms(self.payload(), "DEMO-KEY"))
         self.assertEqual(result["status"], "failed")
         self.assertEqual(result["error_code"], "authentication")
         self.assertNotIn("is_expenditure", result)
 
     def test_invalid_sms_payload_does_not_invoke_classifier(self):
-        with patch("phone_tools.classify_expenditure") as call:
+        with patch("orchestrator.classify_expenditure") as call:
             with self.assertRaises(ValueError):
                 classify_sms('{"body":"PRIVATE"}', "DEMO-KEY")
             call.assert_not_called()
+
+    def test_direct_classification_rejects_invalid_decision_or_timing(self):
+        # Guard the direct-call boundary as well as the raw provider parser.
+        invalid_results = [("true", 1), (1, 1), (None, 1),
+                           (True, True), (True, "1"), (True, -1),
+                           (False, float("nan")), (False, float("inf"))]
+        for output in invalid_results:
+            with self.subTest(output=output), patch("orchestrator.classify_expenditure", return_value=output):
+                result = json.loads(classify_sms(self.payload(), "DEMO-KEY"))
+                self.assertEqual(result, {"schema_version": 1, "message_id": "demo-id",
+                                         "status": "failed", "error_code": "invalid_response"})
 
     def test_redirects_cannot_forward_body_or_key(self):
         handler = classifier._NoRedirect()
