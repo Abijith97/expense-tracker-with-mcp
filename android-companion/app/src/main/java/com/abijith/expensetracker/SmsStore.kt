@@ -30,9 +30,11 @@ data class SmsCaptureState(
 )
 
 /**
- * One small, phone-only store shared by the screen and receiver.
+ * Phone-only diagnostic history shared by the screen and receiver.
  * AtomicFile avoids half-written JSON; noBackupFilesDir excludes these copies
  * from Android backup/transfer. No SMS content is written to logs.
+ * The UI pages cards, but storage never evicts a message at a display boundary.
+ * This whole-file JSON store is a small POC, not a scalable expense database.
  */
 class SmsStore internal constructor(context: Context) {
     private val file = AtomicFile(File(context.noBackupFilesDir, "sms_capture.json"))
@@ -67,7 +69,7 @@ class SmsStore internal constructor(context: Context) {
         val current = state.value
         if (!current.enabled || current.generation != generation) return false
         if (current.messages.any { it.id == message.id }) return false
-        return save(current.copy(messages = (listOf(message) + current.messages).take(MAX_MESSAGES)))
+        return save(current.copy(messages = listOf(message) + current.messages))
     }
 
     @Synchronized
@@ -110,7 +112,7 @@ class SmsStore internal constructor(context: Context) {
         return if (save(current.copy(messages = current.messages.map { if (it.id == id) started else it }))) started else null
     }
 
-    /** Check before the second API call; pause, clear, or eviction must stop it. */
+    /** Check before the second API call; pause or clear must stop it. */
     @Synchronized
     fun canContinueClassification(id: String, generation: Long, attempt: String): Boolean {
         val current = state.value
@@ -160,7 +162,7 @@ class SmsStore internal constructor(context: Context) {
             SmsCaptureState(
                 enabled = json.getBoolean("enabled"),
                 generation = json.getLong("generation"),
-                messages = (0 until minOf(messages.length(), MAX_MESSAGES)).map { index ->
+                messages = (0 until messages.length()).map { index ->
                     val item = messages.getJSONObject(index)
                     CapturedSms(
                         id = item.getString("id"),
@@ -247,7 +249,7 @@ class SmsStore internal constructor(context: Context) {
     }
 
     companion object {
-        const val MAX_MESSAGES = 20
+        const val PAGE_SIZE = 20
         @Volatile private var instance: SmsStore? = null
 
         fun get(context: Context): SmsStore = instance ?: synchronized(this) {

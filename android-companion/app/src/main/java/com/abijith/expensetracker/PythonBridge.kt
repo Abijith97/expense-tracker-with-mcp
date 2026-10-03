@@ -86,11 +86,13 @@ object PythonBridge {
             if (result.getString("status") == "identified") {
                 require(result.get("category") is String)
                 val name = result.getString("category")
-                require(name in SPENDING_CATEGORIES)
+                require(result.get("sub_category") is String)
+                val subCategory = result.getString("sub_category")
+                require(isSpendingCategoryPair(name, subCategory))
                 val apiElapsedMs = result.getDouble("api_elapsed_ms")
                 require(apiElapsedMs.isFinite() && apiElapsedMs >= 0)
                 SmsCategory(CategoryStatus.IDENTIFIED, name, elapsedMs(startedAt), apiElapsedMs,
-                    usage = LlmUsage.fromJson(result.optJSONObject("usage")))
+                    usage = LlmUsage.fromJson(result.optJSONObject("usage")), subCategory = subCategory)
             } else {
                 require(result.getString("status") == "failed")
                 SmsCategory(CategoryStatus.FAILED, elapsedMs = elapsedMs(startedAt),

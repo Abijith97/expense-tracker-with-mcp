@@ -63,7 +63,7 @@ class ClassificationStoreInstrumentedTest {
         val pending = store.prepareClassification(message.id, generation, DEFAULT_CLASSIFIER_MODEL)!!
         assertNotNull(store.startClassification(message.id, generation, pending.attemptId))
         val result = pending.copy(status = ClassificationStatus.EXPENDITURE,
-            category = SmsCategory(CategoryStatus.IDENTIFIED, "Groceries", 12.125, 10.375))
+            category = SmsCategory(CategoryStatus.IDENTIFIED, "utilities", 12.125, 10.375, subCategory = "groceries"))
         assertTrue(store.finishClassification(message.id, generation, result))
         assertEquals(result, SmsStore(context).state.value.messages.single().classification)
         assertEquals(message.id, SmsStore(context).state.value.messages.single().id)
@@ -82,5 +82,27 @@ class ClassificationStoreInstrumentedTest {
         val next = store.prepareClassification(message.id, generation, DEFAULT_CLASSIFIER_MODEL)!!
         assertNotNull(store.startClassification(message.id, generation, next.attemptId))
         assertEquals(ClassificationStatus.INTERRUPTED, SmsStore(context).state.value.messages.single().classification!!.status)
+    }
+
+    @Test
+    fun moreThanTwentyMessagesSurviveRestartAndOldPendingWorkIsStillEligible() {
+        val store = SmsStore(context)
+        assertTrue(store.setEnabled(true))
+        val generation = store.activeGeneration()!!
+        assertTrue(store.append(message, generation))
+        val pending = store.prepareClassification(message.id, generation, DEFAULT_CLASSIFIER_MODEL)!!
+        repeat(25) { index ->
+            assertTrue(store.append(message.copy(id = "demo-extra-$index"), generation))
+        }
+        assertEquals(26, store.state.value.messages.size)
+        val restored = SmsStore(context)
+        assertEquals(26, restored.state.value.messages.size)
+        assertEquals(message.id, restored.state.value.messages.last().id)
+        assertNotNull(restored.startClassification(message.id, generation, pending.attemptId))
+        assertTrue(restored.finishClassification(message.id, generation, pending.copy(status = ClassificationStatus.OTHER)))
+        assertEquals(ClassificationStatus.OTHER, restored.state.value.messages.last().classification!!.status)
+        assertFalse(restored.append(message, generation))
+        assertTrue(restored.clear())
+        assertTrue(SmsStore(context).state.value.messages.isEmpty())
     }
 }

@@ -16,7 +16,8 @@ import platform
 from datetime import datetime, timezone
 from typing import Any
 from app_help import get_help
-from category_identifier import CategoryError, CATEGORIES, identify_category
+from category_identifier import CategoryError, identify_category
+from category_examples import is_valid_label
 from expenditure_classifier import ClassificationError, DEFAULT_MODEL, classify_expenditure
 
 
@@ -114,10 +115,10 @@ def identify_sms_category(payload_json: str, api_key: str, model: str = DEFAULT_
     metrics = {}
     try:
         category, elapsed = identify_category(payload["body"], api_key, model, metrics=metrics)
-        if (type(category) is not str or category not in CATEGORIES
+        if (not is_valid_label(category)
                 or type(elapsed) not in (int, float) or not math.isfinite(elapsed) or elapsed < 0):
             raise CategoryError("invalid_response")
-        result.update(status="identified", category=category, api_elapsed_ms=elapsed)
+        result.update(status="identified", **category, api_elapsed_ms=elapsed)
     except CategoryError as error:
         result.update(status="failed", error_code=error.code)
     result.update(metrics)

@@ -2,8 +2,20 @@ package com.abijith.expensetracker
 
 import org.json.JSONObject
 
-// Keep the phone-side whitelist aligned with category_examples.CATEGORIES.
-val SPENDING_CATEGORIES = setOf("Transport", "Groceries", "Food & dining", "Bills & utilities",
+// Keep the active hierarchy aligned with category_examples.CATEGORY_HIERARCHY.
+val SPENDING_CATEGORY_HIERARCHY = mapOf(
+    "learning" to setOf("engineering"),
+    "utilities" to setOf("transport", "food", "prepaid recharge", "groceries", "health"),
+    "fun" to setOf("gift", "food"),
+    "Not sure" to setOf("Not sure"),
+)
+val SPENDING_CATEGORIES = SPENDING_CATEGORY_HIERARCHY.keys
+internal fun isSpendingCategoryPair(name: String?, subCategory: String?): Boolean =
+    name != null && subCategory != null && subCategory in SPENDING_CATEGORY_HIERARCHY[name].orEmpty()
+
+// Read-only compatibility: old cards keep their original labels, never inferred
+// sub-categories or silent uploads. New API replies must contain a current pair.
+private val LEGACY_SPENDING_CATEGORIES = setOf("Transport", "Groceries", "Food & dining", "Bills & utilities",
     "Subscriptions", "Shopping", "Health", "Education", "Entertainment", "Housing",
     "Personal care", "Other", "Not sure")
 
@@ -17,15 +29,19 @@ data class SmsCategory(
     val apiElapsedMs: Double? = null,
     val errorCode: String? = null,
     val usage: LlmUsage? = null,
+    val subCategory: String? = null,
 ) {
     init {
-        require(if (status == CategoryStatus.IDENTIFIED) name in SPENDING_CATEGORIES else name == null)
+        require(if (status == CategoryStatus.IDENTIFIED) {
+            if (subCategory == null) name in LEGACY_SPENDING_CATEGORIES else isSpendingCategoryPair(name, subCategory)
+        } else name == null && subCategory == null)
         require(elapsedMs == null || elapsedMs.isFinite() && elapsedMs >= 0)
         require(apiElapsedMs == null || apiElapsedMs.isFinite() && apiElapsedMs >= 0)
     }
 
     fun toJson(): JSONObject = JSONObject().put("status", status.name).also {
         name?.let { value -> it.put("name", value) }
+        subCategory?.let { value -> it.put("sub_category", value) }
         elapsedMs?.let { value -> it.put("elapsed_ms", value) }
         apiElapsedMs?.let { value -> it.put("api_elapsed_ms", value) }
         errorCode?.let { value -> it.put("error_code", value) }
@@ -40,6 +56,7 @@ data class SmsCategory(
             apiElapsedMs = if (json.has("api_elapsed_ms")) json.getDouble("api_elapsed_ms") else null,
             errorCode = json.optString("error_code").takeIf { it.isNotBlank() },
             usage = LlmUsage.fromJson(json.optJSONObject("usage")),
+            subCategory = if (json.has("sub_category")) json.getString("sub_category") else null,
         )
     }
 }

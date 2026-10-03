@@ -18,6 +18,7 @@ import androidx.work.workDataOf
 /** Hosted inference runs here, not inside the short-lived SMS receiver. */
 class SmsClassificationWorker(context: Context, parameters: WorkerParameters) : Worker(context, parameters) {
     override fun doWork(): Result {
+        CloudClassificationSettings.initialize(applicationContext)
         val id = inputData.getString("message_id") ?: return Result.failure()
         val attempt = inputData.getString("attempt_id") ?: return Result.failure()
         val session = inputData.getString("cloud_session") ?: return Result.failure()
@@ -65,6 +66,8 @@ class SmsClassificationWorker(context: Context, parameters: WorkerParameters) : 
         private const val TAG = "sms-cloud-classification"
 
         fun enqueue(context: Context, id: String, generation: Long): Boolean {
+            // Receiver executor / UI IO dispatcher, never the broadcast main thread.
+            CloudClassificationSettings.initialize(context)
             val session = CloudClassificationSettings.session() ?: return false
             val settings = CloudClassificationSettings.state.value
             val store = SmsStore.get(context)

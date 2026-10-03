@@ -2,7 +2,7 @@
 
 An Android-only POC for learning LLM-powered workflows and orchestration, with MCP reserved for a possible future user chatbot. The application provides the chat interface and captures new SMS on the same phone.
 
-**Available today:** the app has a Chat tab and an SMS capture tab. Chat calls a local help function through embedded Python and displays its reply. SMS capture saves the latest 20 incoming messages and displays Python's acknowledgement plus stage timings. Optional hosted classification calls the Python classifier directly to label messages **Expenditure** or **Other**, with separate inference timings. Expenditures then get a second hosted call to suggest a spending category or return **Not sure**, displayed on the same card. Cards also show reported token usage and calculated per-attempt USD costs when supported, alongside all existing bottleneck timings. App version: `0.8.0-message-costs`.
+**Available today:** the app has a Chat tab and an SMS capture tab. Chat calls a local help function through embedded Python and displays its reply. SMS capture retains incoming messages until cleared (20 cards per page) and displays Python's acknowledgement plus stage timings. Optional hosted classification calls the Python classifier directly to label messages **Expenditure** or **Other**, with separate inference timings. Expenditures then get a second hosted call to suggest your category/sub-category pair or return **Not sure** for both, displayed on the same card. Cards also show reported token usage and calculated per-attempt USD costs when supported, alongside all existing bottleneck timings. App version: `0.10.0-personal-categories`.
 
 **Still planned:** transaction-detail extraction, expense storage, category confirmation/correction, and LLM chat answers. Every current chat message returns capability information; it does not yet interpret questions or record expenses.
 
@@ -20,7 +20,7 @@ For test locations, coverage, Windows commands, benchmarks, and manual checks, s
 
 **Scope decision:** sender/source validation and transaction ownership checks are deferred to avoid expanding the current POC. The classifier sees the SMS body, so a friend copying a bank alert can receive an Expenditure label. That label means the text describes an outgoing payment, not that the payment is verified as the user's. No source filter or ownership-confirmation feature has been added. Classification still does not insert an expense or affect spending totals.
 
-Category identification is now implemented with starter categories and synthetic few-shot examples. Transaction-detail extraction, review, and a local expense database come next. Ownership validation can be revisited later.
+Category identification uses your 24 labelled examples and a personal category/sub-category hierarchy. Transaction-detail extraction, review, and a local expense database come next. Ownership validation can be revisited later.
 
 ## Design decision: direct functions now, MCP later
 
@@ -34,8 +34,8 @@ MCP can be reconsidered when the future chatbot selects reusable tools such as r
 | --- | --- |
 | `orchestrator.py` | Validate SMS/chat payloads, return local receipts, call classification/category/help directly, and preserve safe result contracts. |
 | `expenditure_classifier.py` | Build the expenditure prompt and parse a strict boolean or raise a safe error. |
-| `category_identifier.py` | Build a separate category prompt and return one allowed category or Not sure; failures are separate. |
-| `category_examples.py` | Starter category vocabulary and synthetic labelled examples, not user-confirmed feedback or training. |
+| `category_identifier.py` | Build the personal category/sub-category prompt; return an allowed pair or Not sure for both, with separate failures. |
+| `category_examples.py` | Personal hierarchy, sanitized user-labelled examples, and valid-pair checks; prompting, not training. |
 | `llm_usage.py` | Whitelist reported token counts and calculate supported standard-tier USD estimates without logging private data. |
 | `llm_api.py` | Shared HTTPS transport and response-envelope parsing for both inference stages. |
 | `classifier_examples.py` | Sanitized labelled examples used by the prompt and offline tests. |
@@ -45,11 +45,22 @@ MCP can be reconsidered when the future chatbot selects reusable tools such as r
 
 The worker calls `orchestrator.classify_sms` first. If it returns Expenditure, and permission, capture generation, retained attempt, and cloud consent still allow processing, the worker calls `orchestrator.identify_sms_category`. Each entry point delegates directly to its Python helper. Other messages and expenditure failures skip categories.
 
-Starter categories: **Transport, Groceries, Food & dining, Bills & utilities, Subscriptions, Shopping, Health, Education, Entertainment, Housing, Personal care, Other, Not sure**.
+Your personal hierarchy (canonical lowercase labels):
 
-The category prompt and enum are in `category_identifier.py` and `category_examples.py`. These starter conventions need user-labelled examples before claiming accuracy: BMTC/metro → Transport, Blinkit without item detail → Groceries, explicit food delivery → Food & dining, Airtel recharge → Bills & utilities, ChatGPT subscription → Subscriptions. An explicit purchase purpose takes priority over the merchant; personal-name transfers, generic marketplaces without item detail, and mixed purchases should return **Not sure**. **Other** means a known purpose outside the named categories, not uncertainty.
+| Category | Allowed sub-categories |
+| --- | --- |
+| `learning` | `engineering` |
+| `utilities` | `transport`, `food`, `prepaid recharge`, `groceries`, `health` |
+| `fun` | `gift`, `food` |
+| `Not sure` | `Not sure` (uncertainty sentinel, not a spending category) |
 
-The category request uses a strict enum schema and Python/Kotlin validation. This constrains the label format, not its correctness. [Official OpenAI structured-output documentation](https://developers.openai.com/api/docs/guides/structured-outputs).
+The 24 user-labelled examples are sanitized in `category_examples.py`; `category_identifier.py` supplies the prompt and a two-field strict schema. Account/card suffixes, bank contact details, transaction references and dates/times are omitted or replaced. Merchant/payee names are retained to express this one-user POC's preferences; they are not universal labels for other users.
+
+OPENAI/ChatGPT → learning/engineering; BMTC/metro/depot → utilities/transport; Indiqube and Chethan B S → utilities/food; Swiggy → fun/food; Toyloft → fun/gift; Airtel → utilities/prepaid recharge; Blinkit/Blink Commerce/Garden city chicken centr → utilities/groceries; Vaman clinic → utilities/health. The listed known personal payees use your transport preference. An **explicit different purpose takes priority**; unknown people, unspecified marketplaces and unclear mixed purchases return Not sure for both fields rather than inventing a label.
+
+Python and Kotlin validate **both labels and their allowed pairing**. Structured output constrains format, not semantic correctness. Examples guide each request; they do not update model weights, learn automatically, or guarantee that all future payments to that payee have the same purpose. [Official OpenAI structured-output documentation](https://developers.openai.com/api/docs/guides/structured-outputs).
+
+New results display category and sub-category on the same SMS card. Old flat suggestions remain explicitly marked as legacy, with sub-category not recorded; they are not silently converted or uploaded. Reclassification is an explicit new chargeable attempt. The same category key, model, expenditure gate, timing measurements and per-attempt calculated-cost telemetry remain in use. More prompt examples can increase input tokens; actual reported counts continue to drive estimates. No category-confirmation or training workflow is implemented.
 
 Category failures are separate from expenditure classification. An expense-labelled message remains Expenditure even if the second request fails; no category is invented. Results are saved on the original captured-message card, not in an expense ledger. Older cards remain readable without a category, and updates do not upload them automatically. Manual reclassification repeats both stages for expenditures.
 
@@ -57,13 +68,21 @@ This adds a second API call/body upload, cost, and sequential latency for expend
 
 Verification for `0.8.0-message-costs`: **51 offline Python tests and 29 Android checks passed**; debug app/test APK builds and lint passed. The APK was installed on the Pixel 7a running Android 17 without clearing storage. No paid API calls were made; live category predictions still need a manual synthetic SMS check.
 
+Verification for `0.10.0-personal-categories`: **54 offline Python tests and 42 Android checks passed**, plus debug app/test APK builds and lint. Installed on the Pixel without clearing history or remembered credentials. Tests validate sanitized examples, pair contracts, legacy compatibility, UI, and unchanged cost/timing behaviour—not live accuracy. No paid calls were made.
+
+## Background processing update
+
+Version `0.9.0-background-processing` adds opt-in encrypted credential/consent persistence and process-restart recovery without keeping the screen open. The 20-message eviction is removed; cards load in pages of 20 and older pending work remains eligible. Existing captures remain intact; already-evicted messages cannot be restored. At that milestone category examples were still starter assumptions; version 0.10 now uses your supplied labels.
+
+Verification: **51 Python tests and 39 Android checks passed**; debug app/test APK builds and lint passed. Installed on the Pixel 7a without clearing history. The tests use synthetic keys/isolated files and make no paid calls. Actual closed-app SMS delivery, reboot recovery, and hosted predictions still require the manual check in the [Android guide](android-companion/README.md#background-processing-and-remembered-credentials).
+
 ## Cost attribution: two dedicated API keys
 
 Create two different OpenAI keys named `financial-classification` and `category-identification`, then enter them in their matching masked fields under SMS capture. Both are required with upload consent; using the same key twice is rejected. The expenditure bridge passes only the classification key, and the category bridge passes only the category key. Both stages keep the shared model setting and existing prompts. Capture and local chat use neither key.
 
 Use each key exclusively for its matching functionality. OpenAI's Costs API supports `api_key_ids` filtering and `group_by=api_key_id` in daily buckets, so the provider-reported monetary totals can be attributed to each functionality. This is not an immediate per-SMS bill; the app displays tokens, calculated costs and timings, but does not retrieve billing totals. [Official OpenAI Costs documentation](https://developers.openai.com/api/reference/resources/admin/subresources/organization/subresources/usage/methods/costs).
 
-Keys remain process-memory-only and are forgotten when cloud is disabled or the process ends. Do not enter an organization Admin key in the phone app. Creating two keys does not change token prices or give each feature a separate billing account. Optional external evaluation must use a separate evaluation key if its cost should not be mixed with app usage.
+Keys are memory-only by default. Opt in to **Remember keys on this device** to encrypt keys/consent and restore background processing after process restarts. **Disable cloud and forget keys** removes the saved authorization. See [background behaviour and retention](android-companion/README.md#background-processing-and-remembered-credentials). Do not enter an organization Admin key in the phone app. Creating two keys does not change token prices or give each feature a separate billing account. Optional external evaluation must use a separate evaluation key if its cost should not be mixed with app usage.
 
 ### Per-message calculated cost and bottleneck timings
 
@@ -73,7 +92,7 @@ Costs include the whole request (instructions, examples, schema and SMS), not ju
 
 Missing or malformed usage, missing cache breakdown, an unknown model or tier, and network failures show **Unavailable**, not zero. Valid predictions remain valid even when telemetry is absent. Refused/incomplete/malformed model outputs retain usage and costs if the provider supplies them, and failures now retain measured call time. A category failure never erases the expenditure label or first-stage usage.
 
-These are calculated estimates, not provider-reported bills. They exclude account-specific adjustments, taxes and currency conversion. The latest attempt replaces the card's previous analysis; earlier retries, discarded/cancelled calls and messages evicted from the 20-card diagnostic history are not a spending audit. Never assume a timeout or missing usage means the request was free. Use the two dedicated keys and OpenAI's external cost reporting to reconcile totals; the app does not store Admin credentials or fetch billing records.
+These are calculated estimates, not provider-reported bills. They exclude account-specific adjustments, taxes and currency conversion. The latest attempt replaces the card's previous analysis; earlier retries, discarded/cancelled calls and cleared history are not a spending audit. Never assume a timeout or missing usage means the request was free. Use the two dedicated keys and OpenAI's external cost reporting to reconcile totals; the app does not store Admin credentials or fetch billing records.
 
 For a manual check, re-enter both keys and consent, send a synthetic BMTC payment, and inspect two sets of tokens/costs plus the combined amount alongside timings. Send an advertising SMS and expect only classification cost with category skipped. Old cards still load without usage and are not uploaded automatically. Reclassifying them is an explicit new, potentially chargeable attempt.
 
@@ -96,6 +115,7 @@ expense-tracker-with-mcp/
     │   │   ├── PythonBridge.kt, SmsPerformance.kt, LlmUsage.kt
     │   │   ├── SmsClassification.kt, SmsClassificationWorker.kt, SmsCategory.kt
     │   │   ├── CloudClassificationSettings.kt, CloudClassificationControls.kt
+    │   │   ├── CloudCredentialVault.kt, FinanceTrackerApplication.kt
     │   │   └── ui/theme/
     │   ├── python/
     │   │   ├── orchestrator.py
@@ -116,6 +136,8 @@ expense-tracker-with-mcp/
     │   ├── ClassificationStoreInstrumentedTest.kt
     │   ├── CloudControlsInstrumentedTest.kt
     │   ├── CloudKeysInstrumentedTest.kt
+    │   ├── CloudPersistenceInstrumentedTest.kt
+    │   ├── SmsHistoryInstrumentedTest.kt
     │   └── LlmUsageInstrumentedTest.kt
     ├── python-tests/
     │   ├── test_orchestrator.py, test_chat.py, test_classifier.py, test_category.py, test_usage.py
@@ -159,10 +181,10 @@ flowchart TB
     CategoryTool <-->|Category identification key| API
 
     subgraph Checks[Verification - run separately]
-        Unit[51 Python unit tests<br/>offline, API mocked; token accounting checked]
+        Unit[54 Python unit tests<br/>offline, API mocked; token accounting checked]
         Integration[4 bridge tests and 1 chat screen test<br/>Pixel or emulator]
         Performance[3 performance checks<br/>JSON encoding, warm bridge, and timing format]
-        ClassificationChecks[21 classifier, category, isolated-store, consent UI, key-routing, and cost checks<br/>no valid API key or external requests]
+        ClassificationChecks[34 classifier, category, history, consent UI, key-routing, cost, and encrypted-recovery checks<br/>no valid API key or external requests]
         Manual[Manual SMS and usability checks]
     end
     Unit -.->|Direct function calls| SMSPython
@@ -181,7 +203,7 @@ flowchart TB
 
 Tests do not run each time an SMS arrives or a chat message is sent. Python unit tests use your computer's interpreter. Android integration tests use the real bridge and the Python bundled in the APK. The screen test types a message, checks the help reply, and switches tabs. These tests do not send SMS or clear saved capture history.
 
-SMS capture starts off until enabled with permission. Cloud uploads also start off; enter both keys privately on the phone and accept consent in the SMS capture tab. Both API keys and cloud consent exist only in phone process memory, not Git, the APK, logs, or saved state. An Android process restart requires entering both keys again. Enabling cloud does not replay existing history, but each saved card has an explicit upload/reclassify button when enabled. Direct use of personal keys is a POC tradeoff, not a key-protection design for distributing this app.
+SMS capture and cloud uploads start off on fresh installation. Enter both keys privately and accept upload consent. Keys are memory-only unless **Remember keys on this device** is selected, which encrypts credentials and consent for process-restart recovery without an open screen. Disabling cloud also forgets saved keys. Settings restoration works for SMS/worker-triggered starts; Android Force stop still requires reopening. Enabling does not replay history; per-card reclassification is an explicit upload. History is retained until cleared, with 20 cards per display page and a Show older messages button. Direct personal keys remain a POC tradeoff, not a distribution design. See the [background setup and manual checks](android-companion/README.md#background-processing-and-remembered-credentials).
 
 The cloud request sends the complete SMS body, which may contain sensitive information; it does not separately send the sender, message ID, or phone metadata. Use synthetic SMS for demos. WorkManager stores only IDs and tokens. It waits for network/system scheduling, but is not a latency optimization. Errors are not classified as Other; retry is manual. Duplicate broadcasts are ignored, and pause/clear invalidates pending updates. Already-sent requests cannot be recalled. Chat is session-only: it keeps the latest 60 entries in memory, survives screen rotation and tab changes, and resets after the app process ends. Captured SMS history remains stored separately on the phone.
 
@@ -193,12 +215,12 @@ Start each check from PowerShell or Android Studio. GitHub Actions is not config
 flowchart TB
     Developer[Developer starts a check]
     Developer --> Shell[PowerShell<br/>activate Python environment and run unittest]
-    Shell --> UnitTests[51 tests check capture, chat, classifier, categories, and costs<br/>synthetic input and mocked HTTP]
+    Shell --> UnitTests[54 tests check capture, chat, classifier, categories, and costs<br/>synthetic input and mocked HTTP]
     UnitTests --> Terminal[Terminal shows pass or fail<br/>and failed assertion details]
 
     Developer --> Studio[Android Studio Run test<br/>or Gradle connectedDebugAndroidTest]
     Studio --> Install[Build and install app plus test APK<br/>on Pixel or emulator]
-    Install --> Runner[AndroidJUnitRunner<br/>29 checks: bridge, UI, performance, classification, categories, and costs]
+    Install --> Runner[AndroidJUnitRunner<br/>42 checks: bridge, UI, performance, classification, categories, costs, and encrypted recovery]
     Runner --> Results[Android Studio or Gradle shows pass or fail]
 
     Developer --> Benchmark[Optional Python benchmark<br/>100 SMS handoffs after warm-up]
@@ -264,7 +286,7 @@ These are logical roles for learning, not five continuously running models. The 
 ### Next verifiable steps
 
 1. Initial live classification is working in the user's phone checks. Broaden the synthetic expenditure/other evaluation and optionally run the paid held-out evaluation to record accuracy and latency. Offline mocked tests do not establish model accuracy; sender/ownership validation is deferred.
-2. Review the starter categories with labelled examples, then add transaction-detail extraction; verify amount, merchant, currency, date, and uncertainty handling.
+2. Evaluate the personal category/sub-category predictions, then add transaction-detail extraction; verify amount, merchant, currency, date, and uncertainty handling.
 3. Add category review, correction, saved feedback, and local SQLite expense storage.
 4. Connect chat queries to the LLM and approved database tools; consider MCP at this point and replace the help-only response.
 5. Add weekly reports shown in the app, with Android scheduling/notifications if background reminders are needed.

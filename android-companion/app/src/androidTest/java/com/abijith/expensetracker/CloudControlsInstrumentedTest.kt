@@ -3,6 +3,8 @@ package com.abijith.expensetracker
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.foundation.layout.Column
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -25,7 +27,7 @@ class CloudControlsInstrumentedTest {
     fun costsAndTokensAppearAlongsideTimingsAndUnknownIsNotZero() {
         val known = LlmUsage(1000, 100, 200, 100, DEFAULT_CLASSIFIER_MODEL,
             "default", .000289, "2026-10-03")
-        val category = mutableStateOf(SmsCategory(CategoryStatus.IDENTIFIED, "Transport", usage = known))
+        val category = mutableStateOf(SmsCategory(CategoryStatus.IDENTIFIED, "utilities", usage = known, subCategory = "transport"))
         compose.setContent {
             FinanceTrackerCompanionTheme {
                 Column { SmsClassificationDetails(SmsClassification(ClassificationStatus.EXPENDITURE,
@@ -47,7 +49,7 @@ class CloudControlsInstrumentedTest {
 
     @Test
     fun categorySuggestionUncertaintyAndFailureAppearSeparately() {
-        val category = mutableStateOf(SmsCategory(CategoryStatus.IDENTIFIED, "Groceries", 2.5, 1.5))
+        val category = mutableStateOf(SmsCategory(CategoryStatus.IDENTIFIED, "utilities", 2.5, 1.5, subCategory = "groceries"))
         compose.setContent {
             FinanceTrackerCompanionTheme {
                 Column {
@@ -57,10 +59,12 @@ class CloudControlsInstrumentedTest {
             }
         }
         compose.onNodeWithText("Classification: Expenditure (true)").assertExists()
-        compose.onNodeWithText("Category: Groceries (suggested, not confirmed)").assertExists()
+        compose.onNodeWithText("Category: utilities (suggested, not confirmed)").assertExists()
+        compose.onNodeWithText("Sub-category: groceries (suggested, not confirmed)").assertExists()
         compose.onNodeWithText("Category API round trip and validation: 1.500 ms").assertExists()
-        compose.runOnIdle { category.value = SmsCategory(CategoryStatus.IDENTIFIED, "Not sure") }
+        compose.runOnIdle { category.value = SmsCategory(CategoryStatus.IDENTIFIED, "Not sure", subCategory = "Not sure") }
         compose.onNodeWithText("Category: Not sure - needs review").assertExists()
+        compose.onNodeWithText("Sub-category: Not sure - needs review").assertExists()
         compose.runOnIdle { category.value = SmsCategory(CategoryStatus.FAILED, errorCode = "authentication") }
         compose.onNodeWithText("Category: Failed - API key rejected. Check your key.").assertExists()
         compose.onNodeWithText("Classification: Expenditure (true)").assertExists()
@@ -83,11 +87,12 @@ class CloudControlsInstrumentedTest {
         var enableCount = 0
         compose.setContent {
             FinanceTrackerCompanionTheme {
-                CloudClassificationControls(state.value, onEnable = { classificationKey, categoryKey, model, consent ->
+                CloudClassificationControls(state.value, onEnable = { classificationKey, categoryKey, model, consent, remember ->
                     assertEquals("DEMO-CLASSIFICATION-KEY", classificationKey)
                     assertEquals("DEMO-CATEGORY-KEY", categoryKey)
                     assertEquals(DEFAULT_CLASSIFIER_MODEL, model)
                     assertEquals(true, consent)
+                    assertEquals(false, remember)
                     enableCount++
                     state.value = CloudClassificationState(true)
                     true
@@ -119,5 +124,62 @@ class CloudControlsInstrumentedTest {
         compose.onNodeWithTag("cloud_category_key").performTextInput("DEMO-CATEGORY-KEY")
         compose.onNodeWithTag("cloud_enable").performClick()
         assertEquals(2, enableCount)
+    }
+
+    @Test
+    fun rememberingIsOptInAndRememberedStatusAndForgetActionAreVisible() {
+        val state = mutableStateOf(CloudClassificationState())
+        var forgotten = false
+        compose.setContent {
+            FinanceTrackerCompanionTheme {
+                CloudClassificationControls(state.value, onEnable = { _, _, _, consent, remember ->
+                    assertEquals(true, consent)
+                    assertEquals(true, remember)
+                    state.value = CloudClassificationState(true, remembered = true)
+                    true
+                }, onDisable = { forgotten = true; state.value = CloudClassificationState() })
+            }
+        }
+        compose.onNodeWithTag("cloud_remember").assertIsOff()
+        compose.onNodeWithTag("cloud_classification_key").performTextInput("DEMO-FIRST")
+        compose.onNodeWithTag("cloud_category_key").performTextInput("DEMO-SECOND")
+        compose.onNodeWithTag("cloud_consent").performClick()
+        compose.onNodeWithTag("cloud_remember").performClick().assertIsOn()
+        compose.onNodeWithTag("cloud_enable").performClick()
+        compose.onNodeWithText("Cloud: Enabled - remembered on this device").assertExists()
+        compose.onNodeWithText("Disable cloud and forget keys").assertExists()
+        compose.onNodeWithTag("cloud_disable").performClick()
+        assertEquals(true, forgotten)
+        compose.onNodeWithTag("cloud_remember").assertIsOff()
+    }
+
+    @Test
+    fun restorationBlocksEnableAndFailureOffersForgetRatherThanSilentlyUploading() {
+        val state = mutableStateOf(CloudClassificationState(loading = true))
+        compose.setContent {
+            FinanceTrackerCompanionTheme {
+                CloudClassificationControls(state.value, onEnable = { _, _, _, _, _ -> error("Unexpected enable") },
+                    onDisable = { state.value = CloudClassificationState() })
+            }
+        }
+        compose.onNodeWithText("Cloud: Restoring settings").assertExists()
+        compose.onNodeWithTag("cloud_enable").assertIsNotEnabled()
+        compose.runOnIdle { state.value = CloudClassificationState(error = "DEMO restore failed") }
+        compose.onNodeWithText("DEMO restore failed").assertExists()
+        compose.onNodeWithTag("cloud_forget").performClick()
+        compose.onNodeWithText("DEMO restore failed").assertDoesNotExist()
+        compose.onNodeWithText("Cloud: Off").assertExists()
+    }
+
+    @Test
+    fun oldFlatCategoriesRemainLegacyWithoutInventingASubCategory() {
+        compose.setContent {
+            FinanceTrackerCompanionTheme {
+                Column { SmsClassificationDetails(SmsClassification(ClassificationStatus.EXPENDITURE,
+                    "demo-old", category = SmsCategory(CategoryStatus.IDENTIFIED, "Food & dining")), false, {}) }
+            }
+        }
+        compose.onNodeWithText("Category: Food & dining (legacy suggestion, not confirmed)").assertExists()
+        compose.onNodeWithText("Sub-category: Not recorded (older result)").assertExists()
     }
 }

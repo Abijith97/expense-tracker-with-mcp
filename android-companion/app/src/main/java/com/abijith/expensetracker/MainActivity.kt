@@ -37,6 +37,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModelProvider
@@ -44,6 +45,8 @@ import com.abijith.expensetracker.ui.theme.FinanceTrackerCompanionTheme
 import java.text.DateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /** App chat and SMS diagnostics. The receiver also works while the screen is closed. */
 class MainActivity : ComponentActivity() {
@@ -106,12 +109,18 @@ class MainActivity : ComponentActivity() {
                                 )
                             },
                             onClear = { showClearConfirmation = true },
-                            onEnableCloud = { classificationKey, categoryKey, model, consent ->
-                                CloudClassificationSettings.enable(classificationKey, categoryKey, model, consent)
+                            onEnableCloud = { classificationKey, categoryKey, model, consent, remember ->
+                                withContext(Dispatchers.IO) {
+                                    CloudClassificationSettings.initialize(this@MainActivity)
+                                    CloudClassificationSettings.enable(classificationKey, categoryKey, model, consent, remember)
+                                }
                             },
                             onDisableCloud = {
-                                CloudClassificationSettings.disable()
-                                SmsClassificationWorker.cancelAll(this@MainActivity)
+                                withContext(Dispatchers.IO) {
+                                    CloudClassificationSettings.initialize(this@MainActivity)
+                                    CloudClassificationSettings.disable()
+                                    SmsClassificationWorker.cancelAll(this@MainActivity)
+                                }
                             },
                             onClassify = { id -> store.activeGeneration()?.let {
                                 SmsClassificationWorker.enqueue(this@MainActivity, id, it)
@@ -192,7 +201,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun SmsDebugScreen(
+internal fun SmsDebugScreen(
     state: SmsCaptureState,
     cloudState: CloudClassificationState,
     permissionGranted: Boolean,
@@ -201,32 +210,33 @@ private fun SmsDebugScreen(
     onPause: () -> Unit,
     onSettings: () -> Unit,
     onClear: () -> Unit,
-    onEnableCloud: (String, String, String, Boolean) -> Boolean,
-    onDisableCloud: () -> Unit,
+    onEnableCloud: suspend (String, String, String, Boolean, Boolean) -> Boolean,
+    onDisableCloud: suspend () -> Unit,
     onClassify: (String) -> Unit,
 ) {
     val capturing = permissionGranted && state.enabled
+    var visibleCount by rememberSaveable { mutableStateOf(SmsStore.PAGE_SIZE) }
     Scaffold(modifier = Modifier.fillMaxSize(), contentWindowInsets = WindowInsets(0, 0, 0, 0)) { innerPadding ->
         LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(innerPadding),
+            modifier = Modifier.fillMaxSize().padding(innerPadding).testTag("sms_history"),
             contentPadding = PaddingValues(20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item {
                 Text("Finance Tracker", style = MaterialTheme.typography.headlineSmall)
-                Text("Milestone 7: category identification", style = MaterialTheme.typography.titleMedium)
+                Text("Milestone 9: personal categories and sub-categories", style = MaterialTheme.typography.titleMedium)
             }
             item {
-                Text("While enabled, this app keeps the latest ${SmsStore.MAX_MESSAGES} incoming SMS messages " +
+                Text("While enabled, this app keeps incoming SMS messages until you clear them " +
                     "on this phone, including non-financial messages. Use synthetic messages for testing. " +
                     "Python acknowledges each new capture inside this APK. " +
                     "Optional hosted classification identifies completed outgoing payments; " +
-                    "it does not yet record expenses or identify spending categories.")
+                    "and suggests your category/sub-category pair. These are diagnostic captures, not expense records.")
             }
             item {
                 Text("SMS permission: ${if (permissionGranted) "Granted" else "Not granted"}")
                 Text("Capture: ${if (capturing) "Enabled" else "Paused"}")
-                Text("Captured messages: ${state.messages.size} / ${SmsStore.MAX_MESSAGES}")
+                Text("Captured messages: ${state.messages.size} (no 20-message storage cap)")
             }
             state.error?.let { error ->
                 item { Text(error, color = MaterialTheme.colorScheme.error) }
@@ -262,7 +272,7 @@ private fun SmsDebugScreen(
             if (state.messages.isEmpty()) {
                 item { Text("No captured messages yet. Enable capture, then send an ordinary SMS to this phone.") }
             }
-            items(state.messages, key = { it.id }) { message ->
+            items(state.messages.take(visibleCount), key = { it.id }) { message ->
                 OutlinedCard(modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("From: ${message.sender}", style = MaterialTheme.typography.titleMedium)
@@ -273,6 +283,13 @@ private fun SmsDebugScreen(
                             canClassify = capturing && cloudState.enabled,
                             onClassify = { onClassify(message.id) })
                         PythonHandoffDetails(message.pythonHandoff)
+                    }
+                }
+            }
+            if (visibleCount < state.messages.size) {
+                item {
+                    OutlinedButton(onClick = { visibleCount += SmsStore.PAGE_SIZE }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Show older messages (${state.messages.size - visibleCount} remaining)")
                     }
                 }
             }

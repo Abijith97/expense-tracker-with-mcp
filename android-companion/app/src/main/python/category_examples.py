@@ -1,30 +1,72 @@
-"""Starter category vocabulary and synthetic few-shot examples, not training.
+"""Personal few-shot labels supplied by the user; this is prompting, not training.
 
-These are initial POC conventions, not user-confirmed labels. Personal names,
-general marketplaces, and mixed purchases deliberately illustrate uncertainty.
+All 24 examples retain only the payee/merchant signal needed for the preference.
+Account/card suffixes, transaction references, dates/times and bank contact details
+are replaced/omitted. Payee names remain personal preferences for this one-user POC.
+They do not prove that the same payee always has the same purpose for anyone else.
 """
 
-CATEGORIES = (
-    "Transport", "Groceries", "Food & dining", "Bills & utilities",
-    "Subscriptions", "Shopping", "Health", "Education", "Entertainment",
-    "Housing", "Personal care", "Other", "Not sure",
+CATEGORY_HIERARCHY = {
+    "learning": ("engineering",),
+    "utilities": ("transport", "food", "prepaid recharge", "groceries", "health"),
+    "fun": ("gift", "food"),
+    "Not sure": ("Not sure",),
+}
+CATEGORIES = tuple(CATEGORY_HIERARCHY)
+SUB_CATEGORIES = tuple(dict.fromkeys(
+    sub_category for values in CATEGORY_HIERARCHY.values() for sub_category in values
+))
+CATEGORY_PAIRS = tuple(
+    (category, sub_category)
+    for category, values in CATEGORY_HIERARCHY.items()
+    for sub_category in values
 )
 
-PROMPT_EXAMPLES = (
-    ("Sent Rs.23 From HDFC Bank A/C *0000 To BMTC On 01/09/26 Ref DEMO", "Transport"),
-    ("Spent Rs.500 on card *0000 at BANGALORE METRO RAIL C. Ref DEMO", "Transport"),
-    ("Spent Rs.807 on card *0000 at BLINKIT. Ref DEMO", "Groceries"),
-    ("Spent Rs.392 on card *0000 at SWIGGY PVT LTD FOOD1. Ref DEMO", "Food & dining"),
-    ("Spent Rs.399 on card *0000 at Raz*Airtel for mobile recharge. Ref DEMO", "Bills & utilities"),
-    ("Spent Rs.1999 on card *0000 at OPENAI *CHATGPT SUBSCR. Ref DEMO", "Subscriptions"),
-    ("Paid Rs.800 for a shirt at Example Clothing Shop. Ref DEMO", "Shopping"),
-    ("Paid Rs.250 for medicines at Example Pharmacy. Ref DEMO", "Health"),
-    ("Paid Rs.500 for a programming course. Ref DEMO", "Education"),
-    ("Paid Rs.300 for movie tickets at Example Cinema. Ref DEMO", "Entertainment"),
-    ("Paid Rs.10000 apartment rent to Example Landlord. Ref DEMO", "Housing"),
-    ("Paid Rs.200 for a haircut at Example Salon. Ref DEMO", "Personal care"),
-    ("Paid Rs.100 as a charitable donation. Ref DEMO", "Other"),
-    ("Sent Rs.234 to Example Person. Ref DEMO", "Not sure"),
-    ("Spent Rs.22250 on card *0000 at ASSPL. Ref DEMO", "Not sure"),
-    ("Paid Rs.700 for groceries and a mobile recharge in one transaction. Ref DEMO", "Not sure"),
+
+def is_valid_label(value):
+    """Validate both fields and their relationship, not just separate enums."""
+    return (
+        type(value) is dict
+        and set(value) == {"category", "sub_category"}
+        and type(value["category"]) is str
+        and type(value["sub_category"]) is str
+        and value["sub_category"] in CATEGORY_HIERARCHY.get(value["category"], ())
+    )
+
+
+# Order follows the user's 24 examples. Values are synthetic; purpose is never
+# inferred from an amount. Repeated merchants demonstrate consistent labels.
+PERSONAL_EXAMPLES = (
+    ("Spent Rs.100 on HDFC Bank Card *0000 at OPENAI. Ref DEMO", "learning", "engineering"),
+    ("Spent Rs.100 on HDFC Bank Card *0000 at BANGALORE METRO RAIL C. Ref DEMO", "utilities", "transport"),
+    ("Spent Rs.100 on HDFC Bank Card *0000 at RAZ*Toyloft. Ref DEMO", "fun", "gift"),
+    ("Sent Rs.10 From HDFC Bank A/C *0000 To DEPOT MANAGER DODDABALLAP. Ref DEMO", "utilities", "transport"),
+    ("Sent Rs.10 From HDFC Bank A/C *0000 To Indiqube SpacesExternal S. Ref DEMO", "utilities", "food"),
+    ("Spent Rs.100 on HDFC Bank Card *0000 at OPENAI *CHATGPT SUBSCR. Ref DEMO", "learning", "engineering"),
+    ("Sent Rs.10 From HDFC Bank A/C *0000 To ALEEM PASHA. Ref DEMO", "utilities", "transport"),
+    ("Spent Rs.100 on HDFC Bank Card *0000 at Raz*Airtel. Ref DEMO", "utilities", "prepaid recharge"),
+    ("Sent Rs.10 From HDFC Bank A/C *0000 To Javed Khan. Ref DEMO", "utilities", "transport"),
+    ("Spent Rs.100 on HDFC Bank Card *0000 at BLINKIT. Ref DEMO", "utilities", "groceries"),
+    ("Sent Rs.15 From HDFC Bank A/C *0000 To DEPOT MANAGER DODDABALLAP. Ref DEMO", "utilities", "transport"),
+    ("Sent Rs.15 From HDFC Bank A/C *0000 To Indiqube SpacesExternal S. Ref DEMO", "utilities", "food"),
+    ("Sent Rs.10 From HDFC Bank A/C *0000 To BMTC. Ref DEMO", "utilities", "transport"),
+    ("Sent Rs.10 From HDFC Bank A/C *0000 To Chethan B S. Ref DEMO", "utilities", "food"),
+    ("Spent Rs.100 on HDFC Bank Card *0000 at SWIGGY PVT LTD FOOD1. Ref DEMO", "fun", "food"),
+    ("Spent Rs.150 on HDFC Bank Card *0000 at BLINKIT. Ref DEMO", "utilities", "groceries"),
+    ("Sent Rs.10 From HDFC Bank A/C *0000 To AJAS. Ref DEMO", "utilities", "transport"),
+    ("Sent Rs.10 From HDFC Bank A/C *0000 To Garden city chicken centr. Ref DEMO", "utilities", "groceries"),
+    ("Sent Rs.10 From HDFC Bank A/C *0000 To CHANDRASHEKAR. Ref DEMO", "utilities", "transport"),
+    ("Spent Rs.100 on HDFC Bank Card *0000 at BLINK COMMERCE PVT LTD. Ref DEMO", "utilities", "groceries"),
+    ("Spent Rs.150 on HDFC Bank Card *0000 at BANGALORE METRO RAIL C. Ref DEMO", "utilities", "transport"),
+    ("Sent Rs.10 From HDFC Bank A/C *0000 To SIVAMMA. Ref DEMO", "utilities", "transport"),
+    ("Sent Rs.15 From HDFC Bank A/C *0000 To Garden city chicken centr. Ref DEMO", "utilities", "groceries"),
+    ("Spent Rs.100 on HDFC Bank Card *0000 at ..VAMAN CLINIC PHA_. Ref DEMO", "utilities", "health"),
+)
+
+PROMPT_EXAMPLES = PERSONAL_EXAMPLES + (
+    ("Sent Rs.10 to Unknown Person. Ref DEMO", "Not sure", "Not sure"),
+    ("Spent Rs.100 on card *0000 at ASSPL. Ref DEMO", "Not sure", "Not sure"),
+    ("Paid Rs.100 for groceries and a mobile recharge in one transaction. Ref DEMO", "Not sure", "Not sure"),
+    ("Spent Rs.100 at BLINKIT for medicines. Ref DEMO", "utilities", "health"),
+    ("Spent Rs.100 at SWIGGY PVT LTD FOOD1 for groceries. Ref DEMO", "utilities", "groceries"),
 )

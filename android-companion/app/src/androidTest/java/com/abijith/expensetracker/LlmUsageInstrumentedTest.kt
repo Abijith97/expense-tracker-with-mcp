@@ -17,7 +17,7 @@ class LlmUsageInstrumentedTest {
 
     @Test
     fun usagePersistsWithBothStageTimingsAndOldResultsRemainReadable() {
-        val category = SmsCategory(CategoryStatus.IDENTIFIED, "Transport", 15.0, 14.0, usage = usage)
+        val category = SmsCategory(CategoryStatus.IDENTIFIED, "utilities", 15.0, 14.0, usage = usage, subCategory = "transport")
         val original = SmsClassification(ClassificationStatus.EXPENDITURE, "demo-cost",
             DEFAULT_CLASSIFIER_MODEL, 30.0, 12.0, category = category, usage = usage)
         assertEquals(original, SmsClassification.fromJson(JSONObject(original.toJson().toString())))
@@ -31,7 +31,7 @@ class LlmUsageInstrumentedTest {
         assertEquals(.000289, analysisEstimatedCostUsd(first)!!, 1e-12)
         assertEquals(.000289, analysisEstimatedCostUsd(first.copy(status = ClassificationStatus.FAILED))!!, 1e-12)
         val expense = first.copy(status = ClassificationStatus.EXPENDITURE,
-            category = SmsCategory(CategoryStatus.IDENTIFIED, "Transport", usage = usage))
+            category = SmsCategory(CategoryStatus.IDENTIFIED, "utilities", usage = usage, subCategory = "transport"))
         assertEquals(.000578, analysisEstimatedCostUsd(expense)!!, 1e-12)
         assertEquals(.000578, analysisEstimatedCostUsd(expense.copy(
             category = SmsCategory(CategoryStatus.FAILED, errorCode = "refused", usage = usage)))!!, 1e-12)
@@ -76,7 +76,7 @@ class LlmUsageInstrumentedTest {
             .put("output", org.json.JSONArray().put(JSONObject().put("type", "message")
                 .put("content", org.json.JSONArray().put(JSONObject().put("type", "output_text").put("text", text)))))
         val responses = org.json.JSONArray().put(response("""{"is_expenditure":true}"""))
-            .put(response("""{"category":"Transport"}"""))
+            .put(response("""{"category":"utilities","sub_category":"transport"}"""))
             .put(response("{}", "incomplete"))
         val fakeResponses = python.getModule("json").callAttr("loads", responses.toString())
         val api = mock.callAttr("Mock", Kwarg("side_effect", fakeResponses))
@@ -94,7 +94,8 @@ class LlmUsageInstrumentedTest {
             assertEquals(ClassificationStatus.EXPENDITURE, first.status)
             assertEquals(usage, first.usage)
             val category = PythonBridge.identifyCategory(context, message, credentials)
-            assertEquals("Transport", category.name)
+            assertEquals("utilities", category.name)
+            assertEquals("transport", category.subCategory)
             assertEquals(usage, category.usage)
             assertEquals(.000578, analysisEstimatedCostUsd(first.copy(category = category))!!, 1e-12)
             val failed = PythonBridge.identifyCategory(context, message, credentials)

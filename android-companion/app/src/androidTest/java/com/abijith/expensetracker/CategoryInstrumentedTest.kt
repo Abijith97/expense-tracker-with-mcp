@@ -4,6 +4,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.chaquo.python.PyException
 import com.chaquo.python.Python
+import com.chaquo.python.Kwarg
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
@@ -38,9 +39,22 @@ class CategoryInstrumentedTest {
         val module = Python.getInstance().getModule("category_identifier")
         val json = Python.getInstance().getModule("json")
         assertEquals(SPENDING_CATEGORIES, module.get("CATEGORIES")!!.asList().map { it.toString() }.toSet())
-        SPENDING_CATEGORIES.forEach { name ->
-            val response = """{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"{\"category\":\"$name\"}"}]}]}"""
-            assertEquals(name, module.callAttr("parse_response", json.callAttr("loads", response)).toString())
+        val hierarchy = JSONObject(json.callAttr("dumps",
+            Python.getInstance().getModule("category_examples").get("CATEGORY_HIERARCHY")!!).toString())
+        assertEquals(SPENDING_CATEGORY_HIERARCHY, hierarchy.keys().asSequence().associateWith { name ->
+            val values = hierarchy.getJSONArray(name)
+            (0 until values.length()).map { values.getString(it) }.toSet()
+        })
+        SPENDING_CATEGORY_HIERARCHY.forEach { (name, subCategories) ->
+            subCategories.forEach { sub ->
+                val response = """{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"{\"category\":\"$name\",\"sub_category\":\"$sub\"}"}]}]}"""
+                // PyObject.get reads attributes, not dictionary items. Use the
+                // same JSON boundary as production rather than treating a dict as a module.
+                val result = JSONObject(json.callAttr("dumps",
+                    module.callAttr("parse_response", json.callAttr("loads", response))).toString())
+                assertEquals(name, result.getString("category"))
+                assertEquals(sub, result.getString("sub_category"))
+            }
         }
         val invalid = """{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"{\"category\":\"PRIVATE-UNKNOWN\"}"}]}]}"""
         try {
@@ -54,7 +68,7 @@ class CategoryInstrumentedTest {
     @Test
     fun onlyExpendituresWithCurrentConsentEnterTheCategoryStage() {
         var calls = 0
-        val identify = { calls++; SmsCategory(CategoryStatus.IDENTIFIED, "Groceries") }
+        val identify = { calls++; SmsCategory(CategoryStatus.IDENTIFIED, "utilities", subCategory = "groceries") }
         listOf(ClassificationStatus.OTHER, ClassificationStatus.FAILED).forEach { status ->
             val original = SmsClassification(status, "demo-attempt")
             assertEquals(original, withCategoryIfExpenditure(original, { fail("Must not check next stage"); false }, identify))
@@ -67,7 +81,8 @@ class CategoryInstrumentedTest {
         assertEquals(0, calls)
         val result = withCategoryIfExpenditure(expenditure, { true }, identify)
         assertEquals(1, calls)
-        assertEquals("Groceries", result.category!!.name)
+        assertEquals("utilities", result.category!!.name)
+        assertEquals("groceries", result.category.subCategory)
         val failure = withCategoryIfExpenditure(expenditure, { true }) {
             SmsCategory(CategoryStatus.FAILED, errorCode = "timeout")
         }
@@ -77,10 +92,61 @@ class CategoryInstrumentedTest {
 
     @Test
     fun categoryResultRoundTripsAndLegacyClassificationStillLoads() {
-        val category = SmsCategory(CategoryStatus.IDENTIFIED, "Not sure", 25.125, 24.375)
+        val category = SmsCategory(CategoryStatus.IDENTIFIED, "Not sure", 25.125, 24.375, subCategory = "Not sure")
         val result = SmsClassification(ClassificationStatus.EXPENDITURE, "demo-attempt", category = category)
         assertEquals(result, SmsClassification.fromJson(JSONObject(result.toJson().toString())))
         val legacy = JSONObject("""{"status":"EXPENDITURE","attempt_id":"older-attempt"}""")
         assertNull(SmsClassification.fromJson(legacy).category)
+        val oldFlat = SmsCategory.fromJson(JSONObject("""{"status":"IDENTIFIED","name":"Groceries","elapsed_ms":2.0}"""))
+        assertEquals("Groceries", oldFlat.name)
+        assertNull(oldFlat.subCategory)
+        assertEquals(oldFlat, SmsCategory.fromJson(oldFlat.toJson()))
+        val current = SmsCategory(CategoryStatus.IDENTIFIED, "learning", subCategory = "engineering")
+        assertEquals(current, SmsCategory.fromJson(current.toJson()))
+    }
+
+    @Test
+    fun wrongPairsAndIncompleteNewLabelsCannotBecomeIdentifiedCategories() {
+        val invalid = listOf("learning" to "transport", "fun" to "health", "Not sure" to "food",
+            "utilities" to "engineering", "utilities" to "Not sure")
+        invalid.forEach { (name, sub) ->
+            assertFalse(isSpendingCategoryPair(name, sub))
+            try {
+                SmsCategory(CategoryStatus.IDENTIFIED, name, subCategory = sub)
+                fail("Invalid pair must be rejected")
+            } catch (_: IllegalArgumentException) { /* Expected validation, no labels echoed. */ }
+        }
+        assertFalse(isSpendingCategoryPair("utilities", null))
+        assertFalse(isSpendingCategoryPair(null, "transport"))
+    }
+
+    @Test
+    fun bridgeRejectsMissingSubCategoryWrongPairsAndWrongTypesWithoutChangingExpenditure() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        PythonBridge.acknowledge(context, message)
+        val mock = Python.getInstance().getModule("unittest.mock")
+        val invalid = listOf(
+            """{"category":"utilities"}""", """{"category":"Groceries"}""",
+            """{"category":"learning","sub_category":"transport"}""",
+            """{"category":"utilities","sub_category":true}""",
+            """{"category":"Not sure","sub_category":"groceries"}""",
+        )
+        invalid.forEach { label ->
+            val reply = JSONObject(label).put("schema_version", 1).put("message_id", message.id)
+                .put("status", "identified").put("api_elapsed_ms", 1.0)
+            val patch = mock.callAttr("patch", "orchestrator.identify_sms_category", Kwarg("return_value", reply.toString()))
+            try {
+                patch.callAttr("start")
+                val result = withCategoryIfExpenditure(SmsClassification(ClassificationStatus.EXPENDITURE,
+                    "demo-attempt"), { true }) {
+                    PythonBridge.identifyCategory(context, message,
+                        CloudCredentials("DEMO-FIRST", "DEMO-SECOND", DEFAULT_CLASSIFIER_MODEL, "demo-session"))
+                }
+                assertEquals(ClassificationStatus.EXPENDITURE, result.status)
+                assertEquals(CategoryStatus.FAILED, result.category!!.status)
+                assertNull(result.category.name)
+                assertNull(result.category.subCategory)
+            } finally { patch.callAttr("stop") }
+        }
     }
 }

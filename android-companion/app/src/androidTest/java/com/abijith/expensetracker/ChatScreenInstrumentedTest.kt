@@ -34,7 +34,7 @@ class ChatScreenInstrumentedTest {
 
         // Tab navigation keeps chat in memory and leaves SMS controls accessible.
         compose.onNodeWithText("SMS capture").performClick()
-        compose.onNodeWithText("Milestone 7: category identification").assertIsDisplayed()
+        compose.onNodeWithText("Milestone 9: personal categories and sub-categories").assertIsDisplayed()
         compose.onNodeWithText("Chat").performClick()
         compose.onNodeWithText("Your message reached the phone-side Python orchestrator.",
             substring = true).assertIsDisplayed()

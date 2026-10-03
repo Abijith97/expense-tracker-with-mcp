@@ -16,34 +16,49 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import java.util.Locale
+import kotlinx.coroutines.launch
 
 @Composable
 fun CloudClassificationControls(state: CloudClassificationState,
-                                onEnable: (String, String, String, Boolean) -> Boolean,
-                                onDisable: () -> Unit) {
+                                onEnable: suspend (String, String, String, Boolean, Boolean) -> Boolean,
+                                onDisable: suspend () -> Unit) {
     // Never use rememberSaveable for secrets: no key in Android saved state.
     var classificationApiKey by remember { mutableStateOf("") }
     var categoryApiKey by remember { mutableStateOf("") }
     var model by remember { mutableStateOf(state.model) }
     var consent by remember { mutableStateOf(false) }
+    var rememberKeys by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     var error by remember { mutableStateOf(false) }
     OutlinedCard(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Cloud expenditure classification", style = MaterialTheme.typography.titleMedium)
-            Text("Cloud: ${if (state.enabled) "Enabled for this app process" else "Off"}")
-            Text("Personal POC only. Your keys stay in phone memory, not the APK, source code, " +
-                "logs, or disk. Re-enter both after Android ends the process. A distributed app " +
-                "must use a backend to protect API keys.", style = MaterialTheme.typography.bodySmall)
+            Text("Cloud: ${when { state.loading -> "Restoring settings"; state.enabled && state.remembered ->
+                "Enabled - remembered on this device"; state.enabled -> "Enabled for this app process"; else -> "Off" }}")
+            Text("Personal POC only. Keys are never embedded or logged. By default they stay in memory. " +
+                "Remembering them encrypts keys and upload consent on this device for background processing. " +
+                "A compromised phone/app can still expose them; this is not a distribution design.",
+                style = MaterialTheme.typography.bodySmall)
+            state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            if (state.error != null && !state.enabled) {
+                OutlinedButton(onClick = { scope.launch { busy = true; try { onDisable() } finally { busy = false } } },
+                    enabled = !busy && !state.loading, modifier = Modifier.testTag("cloud_forget")) {
+                    Text("Forget saved keys")
+                }
+            }
             if (state.enabled) {
                 Text("Model: ${state.model}")
-                OutlinedButton(onClick = onDisable, modifier = Modifier.testTag("cloud_disable")) {
-                    Text("Disable cloud classification")
+                OutlinedButton(onClick = { scope.launch { busy = true; try { onDisable() } finally { busy = false } } },
+                    enabled = !busy, modifier = Modifier.testTag("cloud_disable")) {
+                    Text("Disable cloud and forget keys")
                 }
             } else {
                 OutlinedTextField(value = classificationApiKey,
@@ -68,14 +83,25 @@ fun CloudClassificationControls(state: CloudClassificationState,
                         "Expenditures get a second upload for category identification. " +
                         "This includes non-financial messages and may incur API charges.")
                 }
+                Row {
+                    Checkbox(checked = rememberKeys, onCheckedChange = { rememberKeys = it },
+                        enabled = !busy && !state.loading, modifier = Modifier.testTag("cloud_remember"))
+                    Text("Remember keys on this device. Continue uploading new SMS after app/process " +
+                        "restarts until I disable cloud. No screen needs to stay open.")
+                }
                 Text("Sender and message ID are not uploaded, but the body can contain personal " +
                     "details or OTPs. This POC does not redact bodies before upload. " +
                     "Use synthetic SMS for the demo. Enabling does not upload existing history.",
                     style = MaterialTheme.typography.bodySmall)
                 Button(onClick = {
-                    error = !onEnable(classificationApiKey, categoryApiKey, model, consent)
-                    if (!error) { classificationApiKey = ""; categoryApiKey = ""; consent = false }
-                }, enabled = classificationApiKey.isNotBlank() && categoryApiKey.isNotBlank() &&
+                    scope.launch {
+                        busy = true
+                        try {
+                            error = !onEnable(classificationApiKey, categoryApiKey, model, consent, rememberKeys)
+                            if (!error) { classificationApiKey = ""; categoryApiKey = ""; consent = false; rememberKeys = false }
+                        } finally { busy = false }
+                    }
+                }, enabled = !busy && !state.loading && classificationApiKey.isNotBlank() && categoryApiKey.isNotBlank() &&
                     classificationApiKey.trim() != categoryApiKey.trim() && model.isNotBlank() && consent,
                     modifier = Modifier.testTag("cloud_enable")) { Text("Enable cloud classification") }
                 if (error) Text("Enter two different keys without internal whitespace, a model, and consent.",
@@ -116,11 +142,19 @@ fun SmsClassificationDetails(classification: SmsClassification?, canClassify: Bo
         val categoryLabel = when (category?.status) {
             null -> "Not identified (older result)"
             CategoryStatus.IDENTIFIED -> if (category.name == "Not sure") "Not sure - needs review"
+                else if (category.subCategory == null) "${category.name} (legacy suggestion, not confirmed)"
                 else "${category.name} (suggested, not confirmed)"
             CategoryStatus.FAILED -> "Failed - ${classificationFailureMessage(category.errorCode)}"
             CategoryStatus.INTERRUPTED -> "Interrupted - you can retry manually"
         }
         Text("Category: $categoryLabel", style = MaterialTheme.typography.titleSmall)
+        if (category?.status == CategoryStatus.IDENTIFIED) {
+            Text("Sub-category: ${when (category.subCategory) {
+                null -> "Not recorded (older result)"
+                "Not sure" -> "Not sure - needs review"
+                else -> "${category.subCategory} (suggested, not confirmed)"
+            }}", style = MaterialTheme.typography.titleSmall)
+        }
         category?.elapsedMs?.let {
             Text("Category processing: ${String.format(Locale.US, "%.3f", it)} ms")
         }

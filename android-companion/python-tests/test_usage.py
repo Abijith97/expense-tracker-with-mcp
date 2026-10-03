@@ -15,7 +15,7 @@ from orchestrator import classify_sms, identify_sms_category
 
 
 def response(value=True):
-    output = {"is_expenditure": value} if isinstance(value, bool) else {"category": value}
+    output = {"is_expenditure": value} if isinstance(value, bool) else value
     return {"status": "completed", "model": PRICED_MODEL, "service_tier": "default",
         "usage": {"input_tokens": 1000, "output_tokens": 100,
             "input_tokens_details": {"cached_tokens": 200, "cache_write_tokens": 100},
@@ -77,7 +77,7 @@ class UsageTests(unittest.TestCase):
 
     def test_both_real_entry_points_pass_safe_telemetry_and_standard_tier(self):
         for helper, entry, value in ((classifier, classify_sms, True),
-                                     (category, identify_sms_category, "Transport")):
+                                     (category, identify_sms_category, {"category": "utilities", "sub_category": "transport"})):
             with patch.object(helper, "send_request", return_value=response(value)) as request:
                 result = json.loads(entry(payload(), "PRIVATE-KEY"))
             self.assertIn(result["status"], ("classified", "identified"))
