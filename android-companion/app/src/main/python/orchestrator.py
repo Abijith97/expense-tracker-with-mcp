@@ -1,8 +1,9 @@
 """Receive SMS and chat messages from the Android application.
 
 SMS capture stays local and fast. A separate background entry point calls the
-hosted expenditure classifier after explicit cloud opt-in. Chat still returns
-built-in help; category extraction, MCP tools, and finance storage come later.
+phone MCP classification tool after explicit cloud opt-in. Chat calls the local
+MCP help tool. The workflow selects tools in code, not in an autonomous LLM loop.
+Category extraction and finance storage come later.
 """
 
 from __future__ import annotations
@@ -11,7 +12,8 @@ import json
 import platform
 from datetime import datetime, timezone
 from typing import Any
-from expenditure_classifier import ClassificationError, DEFAULT_MODEL, classify_expenditure
+from expenditure_classifier import DEFAULT_MODEL
+from phone_mcp_client import McpToolError, call_phone_tool
 
 
 def _is_nonnegative_int(value: Any) -> bool:
@@ -82,9 +84,9 @@ def classify_sms(payload_json: str, api_key: str, model: str = DEFAULT_MODEL) ->
     payload = json.loads(payload_json)
     result = {"schema_version": 1, "message_id": receipt["message_id"]}
     try:
-        decision, api_elapsed_ms = classify_expenditure(payload["body"], api_key, model)
-        result.update(status="classified", is_expenditure=decision, api_elapsed_ms=api_elapsed_ms)
-    except ClassificationError as error:
+        classification = call_phone_tool("classify_financial_message", {"body": payload["body"]}, api_key, model)
+        result.update(status="classified", **classification)
+    except McpToolError as error:
         result.update(status="failed", error_code=error.code)
     return json.dumps(result)
 
@@ -94,7 +96,8 @@ def handle_chat(payload_json: str) -> str:
 
     Every valid message currently receives capability information. This proves
     the chat handoff without pretending to interpret spending queries. It uses
-    no LLM, MCP server, network, or finance database, and does not echo the input.
+    the get_help MCP tool, but no LLM, network, or finance database. It does not
+    echo the input or send the chat body to a tool or hosted model.
     """
     invalid_payload = "Invalid chat handoff payload."
     if not isinstance(payload_json, str):
@@ -121,17 +124,6 @@ def handle_chat(payload_json: str) -> str:
         "schema_version": 1,
         "message_id": message_id,
         "status": "capabilities",
-        "reply": (
-            "Your message reached the phone-side Python orchestrator.\n\n"
-            "This build provides built-in help and captures new SMS after you "
-            "enable access in the SMS capture tab. Captured messages get a "
-            "Python acknowledgement. Enable cloud classification in SMS capture "
-            "with your own OpenAI API key and consent to classify new messages "
-            "as Expenditure or Other. Classification uploads the SMS body and "
-            "may incur API charges.\n\n"
-            "Category confirmation, recording expenses, "
-            "and spending summaries are planned. They are not available yet. "
-            "For now, every chat message returns this help information."
-        ),
+        "reply": call_phone_tool("get_help", {})["reply"],
         "processed_at_utc": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
     })

@@ -10,7 +10,7 @@ import socket
 import sys
 import unittest
 import urllib.error
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app/src/main/python"))
 import expenditure_classifier as classifier
@@ -132,7 +132,7 @@ class ExpenditureClassifierTests(unittest.TestCase):
 
     def test_sms_orchestration_preserves_boolean_and_omits_private_data(self):
         for decision in (True, False):
-            with self.subTest(decision=decision), patch("orchestrator.classify_expenditure", return_value=(decision, 12.5)) as call:
+            with self.subTest(decision=decision), patch("phone_tools.classify_expenditure", return_value=(decision, 12.5)) as call:
                 result = json.loads(classify_sms(self.payload(), "DEMO-KEY"))
                 self.assertEqual(result["status"], "classified")
                 self.assertIs(result["is_expenditure"], decision)
@@ -144,14 +144,14 @@ class ExpenditureClassifierTests(unittest.TestCase):
                 self.assertNotIn("Sent Rs", json.dumps(result))
 
     def test_sms_orchestration_failure_has_no_false_decision(self):
-        with patch("orchestrator.classify_expenditure", side_effect=classifier.ClassificationError("authentication")):
+        with patch("phone_tools.classify_expenditure", side_effect=classifier.ClassificationError("authentication")):
             result = json.loads(classify_sms(self.payload(), "DEMO-KEY"))
         self.assertEqual(result["status"], "failed")
         self.assertEqual(result["error_code"], "authentication")
         self.assertNotIn("is_expenditure", result)
 
     def test_invalid_sms_payload_does_not_invoke_classifier(self):
-        with patch("orchestrator.classify_expenditure") as call:
+        with patch("phone_tools.classify_expenditure") as call:
             with self.assertRaises(ValueError):
                 classify_sms('{"body":"PRIVATE"}', "DEMO-KEY")
             call.assert_not_called()

@@ -2,11 +2,13 @@
 
 An Android-only POC for learning MCP, AI agents, and orchestration. The application provides the chat interface and captures new SMS on the same phone.
 
-**Available today:** the app has a Chat tab and an SMS capture tab. Chat sends your message to embedded Python and displays built-in help. SMS capture saves the latest 20 incoming messages and displays Python's acknowledgement plus stage timings. Optional hosted OpenAI classification labels messages **Expenditure** or **Other**, with separate inference timings. App version: `0.4.0-expenditure-classification`.
+**Available today:** the app has a Chat tab and an SMS capture tab. Chat calls the phone-side MCP `get_help` tool through embedded Python and displays its reply. SMS capture saves the latest 20 incoming messages and displays Python's acknowledgement plus stage timings. Optional hosted classification now uses the MCP `classify_financial_message` tool to label messages **Expenditure** or **Other**, with separate inference timings. App version: `0.5.0-phone-mcp-tools`.
 
-**Still planned:** transaction extraction, expense storage, category review, LLM chat answers, and phone-side MCP tools. Every current chat message returns capability information; it does not yet interpret questions or record expenses.
+**Still planned:** transaction extraction, expense storage, category review, and LLM chat answers. Every current chat message returns capability information; it does not yet interpret questions or record expenses.
 
 Capture and built-in chat help work offline. Hosted classification needs internet, your own API key, and explicit upload consent. It needs no WhatsApp account, Twilio, ngrok, public webhook, or laptop service. Open the [Android project and setup guide](android-companion/README.md) to build, install, and run it.
+
+For test locations, coverage, Windows commands, benchmarks, and manual checks, see the [Markdown testing wiki](docs/wiki/Testing.md).
 
 ## Progress — October 3, 2026
 
@@ -14,10 +16,24 @@ Capture and built-in chat help work offline. Hosted classification needs interne
 - Hosted expenditure classification is implemented and installed. The user reports correct predictions for the messages tried on the phone. This verifies the live path for those samples, not a measured accuracy percentage or perfect classification for all messages.
 - The few-shot prompt uses sanitized examples based on 25 outgoing-payment SMS and nine non-payment SMS, with additional synthetic counterexamples. This is prompting, not model training. Results and hosted-call latency appear separately from capture timings.
 - On October 2, all **26 offline Python tests** and **14 Android checks** passed; debug APK builds and lint passed. Automated tests do not make paid API calls or establish model accuracy.
+- On October 3, phone-side classification and help were exposed as MCP tools. All **43 offline Python tests** passed, including 17 MCP checks, and all **16 Android checks** passed on the Pixel. Debug app/test APK builds and lint passed; version `0.5.0-phone-mcp-tools` was installed over the existing app without clearing storage. The official MCP Python SDK also successfully connected to the desktop stdio entry point, listed tools, called help, and received a safe missing-key error. These checks made no paid API calls; live classification through the new MCP path still needs a manual SMS check.
 
 **Scope decision:** sender/source validation and transaction ownership checks are deferred to avoid expanding the current POC. The classifier sees the SMS body, so a friend copying a bank alert can receive an Expenditure label. That label means the text describes an outgoing payment, not that the payment is verified as the user's. No source filter or ownership-confirmation feature has been added. Classification still does not insert an expense or affect spending totals.
 
-The next functional milestone remains transaction-detail extraction and category identification, followed by review and phone-side MCP/database integration. Ownership validation can be revisited later.
+The next functional milestone remains transaction-detail extraction and category identification, followed by review and phone-side expense-database tools. Ownership validation can be revisited later.
+
+## MCP tools available now
+
+| Tool | Owns | Returns |
+| --- | --- | --- |
+| `classify_financial_message(body)` | Build the few-shot prompt, call hosted OpenAI, and validate the model response. Requires the app's existing cloud consent/key. | `is_expenditure`: actual `true` or `false`, plus `api_elapsed_ms`. Failures are MCP tool errors, never `false`. |
+| `get_help()` | Explain the implemented capabilities and setup without an LLM/network call. | Help text for the app Chat tab. |
+
+The orchestrator uses [`phone_mcp_client.py`](android-companion/app/src/main/python/phone_mcp_client.py) to initialize a connection, discover tools with `tools/list`, and invoke `tools/call`. [`phone_mcp_server.py`](android-companion/app/src/main/python/phone_mcp_server.py) validates and dispatches the request to [`phone_tools.py`](android-companion/app/src/main/python/phone_tools.py). The classification tool calls the existing prompt/API helper in `expenditure_classifier.py`. Prompt construction and HTTP parsing are internal helpers, not separate publicly callable tools.
+
+Both MCP sides run inside the APK. They exchange serialized JSON-RPC messages through a custom in-memory transport; no server port, laptop, or hosted MCP service is required. This is a small standard-library, tools-only implementation of MCP **2025-11-25**, not the official SDK or a complete protocol implementation. It also provides a standard desktop stdio entry point. See the [transport and compatibility guide](android-companion/README.md#phone-side-mcp-tools); MCP permits [custom transports preserving its message format and lifecycle](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports#custom-transports).
+
+The API key/model are private session context, not tool arguments. Capture validation and JSON acknowledgement remain a local handoff, not a finance tool. The code still chooses a fixed workflow; using MCP does not by itself make the classifier an autonomous agent. Category, validation, training/feedback, and expense tools will be added when those capabilities are implemented.
 
 ## Current implementation: SMS and app chat
 
@@ -32,23 +48,28 @@ flowchart TB
         Save -->|If capture remains active| Bridge[PythonBridge<br/>shared embedded Python runtime]
         ChatWork --> Bridge
         Bridge -->|SMS payload| SMSPython[orchestrator.handle_sms<br/>validate and return receipt]
-        Bridge -->|Chat payload| ChatPython[orchestrator.handle_chat<br/>validate and return built-in help]
+        Bridge -->|Chat payload| ChatPython[orchestrator.handle_chat<br/>validate and request help]
         SMSPython --> SMSResult[Bridge checks receipt or failure<br/>SmsStore updates original message]
         SMSResult --> SMSScreen[SMS capture tab<br/>status, receipt, and elapsed time]
         SMSResult -->|Only when cloud consent and key are active| CloudWork[WorkManager<br/>separate network-constrained job]
-        CloudWork --> Classifier[orchestrator.classify_sms<br/>few-shot expenditure classifier]
-        Classifier <--> API[OpenAI Responses API<br/>strict boolean output]
-        Classifier --> Classified[SmsStore updates same message<br/>Expenditure, Other, or explicit failure]
+        CloudWork --> Classifier[orchestrator.classify_sms<br/>validate and request classification]
+        Classifier --> MCPClient[Phone MCP client<br/>initialize, discover, and call]
+        ChatPython --> MCPClient
+        MCPClient <--> MCPServer[Phone MCP server<br/>JSON-RPC over in-memory transport]
+        MCPServer --> ClassifyTool[classify_financial_message<br/>few-shot prompt and hosted API call]
+        MCPServer --> HelpTool[get_help<br/>local capability information]
+        ClassifyTool -->|Result returns through MCP client and orchestrator| Classified[SmsStore updates same message<br/>Expenditure, Other, or explicit failure]
         Classified --> SMSScreen
-        ChatPython --> ChatResult[Bridge checks reply or failure<br/>ChatViewModel updates conversation]
+        HelpTool -->|Result returns through MCP client and orchestrator| ChatResult[Bridge checks reply or failure<br/>ChatViewModel updates conversation]
         ChatResult --> ChatScreen[Chat tab<br/>reply and elapsed time]
     end
+    ClassifyTool <--> API[Hosted OpenAI Responses API<br/>strict boolean output]
 
     subgraph Checks[Verification - run separately]
-        Unit[26 Python unit tests<br/>offline, API mocked]
+        Unit[43 Python unit tests<br/>offline, API mocked]
         Integration[4 bridge tests and 1 chat screen test<br/>Pixel or emulator]
         Performance[3 performance checks<br/>JSON encoding, warm bridge, and timing format]
-        ClassificationChecks[6 classifier, isolated-store, and consent UI checks<br/>no valid API key or external requests]
+        ClassificationChecks[8 classifier/MCP, isolated-store, and consent UI checks<br/>no valid API key or external requests]
         Manual[Manual SMS and usability checks]
     end
     Unit -.->|Direct function calls| SMSPython
@@ -56,8 +77,9 @@ flowchart TB
     Integration -.->|Call packaged Python| Bridge
     Integration -.->|Enter text, send, and switch tabs| Chat
     Performance -.->|Synthetic message measurements| Bridge
-    Unit -.->|Mock HTTP and validate parsing| Classifier
-    ClassificationChecks -.->|Packaged parser and missing-key path| Classifier
+    Unit -.->|Mock HTTP and validate parsing| ClassifyTool
+    Unit -.->|Handshake, schemas, calls, and failures| MCPServer
+    ClassificationChecks -.->|Packaged protocol, parser, and missing-key path| MCPServer
     ClassificationChecks -.->|Isolated storage and stub consent controls| Classified
     Manual -.->|Receive an actual SMS| SMS
     Manual -.->|Inspect capture controls and saved history| SMSScreen
@@ -77,12 +99,12 @@ Start each check from PowerShell or Android Studio. GitHub Actions is not config
 flowchart TB
     Developer[Developer starts a check]
     Developer --> Shell[PowerShell<br/>activate Python environment and run unittest]
-    Shell --> UnitTests[26 tests check capture, chat, and classifier<br/>synthetic input and mocked HTTP]
+    Shell --> UnitTests[43 tests check capture, chat, classifier, and MCP<br/>synthetic input and mocked HTTP]
     UnitTests --> Terminal[Terminal shows pass or fail<br/>and failed assertion details]
 
     Developer --> Studio[Android Studio Run test<br/>or Gradle connectedDebugAndroidTest]
     Studio --> Install[Build and install app plus test APK<br/>on Pixel or emulator]
-    Install --> Runner[AndroidJUnitRunner<br/>14 checks: bridge, UI, performance, and classification]
+    Install --> Runner[AndroidJUnitRunner<br/>16 checks: bridge, UI, performance, classification, and MCP]
     Runner --> Results[Android Studio or Gradle shows pass or fail]
 
     Developer --> Benchmark[Optional Python benchmark<br/>100 SMS handoffs after warm-up]
@@ -129,9 +151,9 @@ flowchart TB
     end
 ```
 
-The goal puts the orchestrator, MCP client, MCP server, and expense database on the phone. MCP communication stays inside the application rather than requiring a public internet endpoint. The existing desktop MCP implementation still needs adaptation and an Android compatibility check; it is not included in the APK today.
+The goal puts the orchestrator, MCP client, MCP server, and expense database on the phone. MCP communication stays inside the application rather than requiring a public internet endpoint. The phone MCP client/server now support classification and help; SQLite expense recording/query tools are still planned. The earlier desktop backend has been removed from the current source tree; its code remains in Git history.
 
-Hosted OpenAI inference is the selected POC approach. The expenditure classifier uses the Responses API and a few-shot prompt, defaulting to `gpt-5.6-luna` with reasoning effort `none`; the model ID can be changed in the app. Chat still returns local built-in help. The model does not write to a database, call MCP tools, or train itself in this milestone. [OpenAI model documentation](https://developers.openai.com/api/docs/models/gpt-5.6-luna), [structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs).
+Hosted OpenAI inference is the selected POC approach. The expenditure classifier uses the Responses API and a few-shot prompt, defaulting to `gpt-5.6-luna` with reasoning effort `none`; the model ID can be changed in the app. Chat still returns local help through MCP. The orchestrator calls MCP; the classifier LLM returns a boolean and does not choose tools, write to a database, or train itself in this milestone. [OpenAI model documentation](https://developers.openai.com/api/docs/models/gpt-5.6-luna), [structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs).
 
 ### Five agent roles
 
@@ -148,7 +170,7 @@ These are logical roles for learning, not five continuously running models. The 
 ### Next verifiable steps
 
 1. Initial live classification is working in the user's phone checks. Broaden the synthetic expenditure/other evaluation and optionally run the paid held-out evaluation to record accuracy and latency. Offline mocked tests do not establish model accuracy; sender/ownership validation is deferred.
-2. Adapt the MCP server to Android and verify local record/query tools with SQLite.
+2. Extend the phone MCP server with local record/query tools using SQLite after adding transaction extraction and categories.
 3. Connect chat queries to the LLM and MCP tools; replace the built-in help-only response.
 4. Add category review, correction, and saved feedback in the app.
 5. Add weekly reports shown in the app, with Android scheduling/notifications if background reminders are needed.
@@ -157,4 +179,8 @@ Network/model work uses separately scheduled Android background work. The receiv
 
 ## Earlier WhatsApp POC
 
-The [v0.1.0 release](https://github.com/Abijith97/expense-tracker-with-mcp/releases/tag/v0.1.0) preserves the earlier WhatsApp/Twilio/FastAPI/Ollama/MCP solution. Its root-level Python files remain available as reference code and are not dependencies of the Android APK. The app-only implementation is under `android-companion/`; do not start `main.py` or ngrok to use it.
+The [v0.1.0 release](https://github.com/Abijith97/expense-tracker-with-mcp/releases/tag/v0.1.0) preserves the earlier WhatsApp/Twilio/FastAPI/Ollama/MCP solution. The unused root-level backend Python files and its `requirements.txt` have been removed from the current source tree. The active implementation and tests are under `android-companion/`; use Android Studio to run the app, not a laptop Python server or ngrok.
+
+The cleanup also removes generated sample tests, unused XML color resources, an empty R8-rules template, unused imports, and dependencies used only by the removed unit-test/preview scaffolding. The real tests, timings, optional model evaluation, and MCP compatibility tools remain because they verify the current implementation. No captured messages, credentials, local databases, or development environments are deleted.
+
+After cleanup, all 43 Python tests, 16 Pixel integration checks, and the MCP compatibility check passed again. The cleaned app/test APKs built and Android lint passed with no remaining unused-resource warnings. Active phone methods were retained: they are used by the app, tests, MCP, or Android lifecycle callbacks. The cleaned APK was installed without clearing app storage.

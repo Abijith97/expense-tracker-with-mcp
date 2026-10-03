@@ -1,6 +1,0 @@
-fastapi
-mcp
-ollama
-python-multipart
-sqlalchemy
-uvicorn[standard]

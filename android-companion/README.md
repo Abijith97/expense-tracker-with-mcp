@@ -1,12 +1,12 @@
-# Android app — milestone 4: expenditure classification
+# Android app — milestone 5: phone-side MCP tools
 
-The Android application provides its own Chat tab alongside SMS capture diagnostics, stage timings, and optional hosted expenditure classification. Python runs inside the APK. App version: `0.4.0-expenditure-classification` (`versionCode` 5).
+The Android application provides its own Chat tab alongside SMS capture diagnostics, stage timings, and optional hosted expenditure classification. Python and the MCP client/server run inside the APK. App version: `0.5.0-phone-mcp-tools` (`versionCode` 6).
 
-Chat currently returns built-in help for every message, including what the app can do and which finance features are planned. Chat does not yet perform LLM inference, call MCP tools, record expenses, or answer spending questions. SMS classification can call OpenAI after you enter your own key and consent. The app runs without a WhatsApp account, Twilio, ngrok, or a separately hosted application backend.
+Chat currently calls the MCP `get_help` tool for every message, including what the app can do and which finance features are planned. Chat does not yet perform LLM inference, record expenses, or answer spending questions. SMS classification uses the MCP `classify_financial_message` tool, which can call OpenAI after you enter your own key and consent. The app runs without a WhatsApp account, Twilio, ngrok, or a separately hosted application backend.
 
 Capture starts **off** on a fresh installation. When you enable it and grant Android's SMS permission, the app keeps the latest 20 newly received SMS messages in app-private local storage. Each entry contains the sender, body, SMS timestamp, capture timestamp, handoff status, and any classification result. All ordinary SMS messages are captured while enabled, including non-financial messages.
 
-The capture/chat entry points validate input and return a receipt or built-in help without network calls. A separate background classification entry point uses Python's standard-library HTTPS client to call the OpenAI Responses API. No extra Python packages or separate phone Python installation are needed. Categories, MCP, and finance-database updates are not implemented in the APK yet.
+The capture/chat entry points validate input and return a receipt or help without network calls. A separate background classification entry point invokes the phone MCP tool, which uses Python's standard-library HTTPS client to call the OpenAI Responses API. No extra Python packages or separate phone Python installation are needed. Categories and finance-database updates are not implemented in the APK yet.
 
 Progress on October 3, 2026: the user reports that live phone classification is working and correctly predicts the messages tested. This is a manual sample check, not a measured accuracy percentage. Sender/source validation and ownership confirmation are intentionally deferred: a transaction alert copied by a friend can still be labelled Expenditure because the classifier sees only the body. It does not verify whose transaction it is, insert an expense, or change totals. See the [progress and scope decision](../README.md#progress--october-3-2026).
 
@@ -15,7 +15,7 @@ Progress on October 3, 2026: the user reports that live phone classification is 
 1. Type a message in the Chat tab and tap **Send**. Blank messages cannot be sent.
 2. `ChatViewModel` adds your message and starts work on a background executor.
 3. `PythonBridge.replyToChat(...)` builds a versioned JSON payload and calls `orchestrator.handle_chat(...)` in the APK's Python runtime.
-4. Python validates the payload and returns built-in capability information.
+4. Python validates the payload. Its MCP client initializes/discovers tools and calls `get_help`; the phone MCP server returns local capability information. The chat body is not passed to the tool or OpenAI.
 5. Kotlin checks the reply and displays it with elapsed processing time. A processing error becomes a generic retry message.
 
 Chat keeps the latest 60 entries in memory, survives rotation and tab changes, and resets after the app process ends. It does not write chat messages to disk or logs. SMS history is stored separately and survives restarts.
@@ -28,7 +28,7 @@ Chat keeps the latest 60 entries in memory, survives rotation and tab changes, a
 4. Python validates the fields and returns a JSON receipt.
 5. Kotlin checks the receipt and updates the **same saved message** to `Python: Acknowledged`.
 6. If cloud classification is enabled, enqueue a separate WorkManager job requiring internet. The receiver does not wait for inference.
-7. The worker verifies permission, capture token, retained message, and current cloud consent/key. Python sends only the SMS body in a few-shot prompt to OpenAI.
+7. The worker verifies permission, capture token, retained message, and current cloud consent/key. `orchestrator.classify_sms` uses the phone MCP client to call `classify_financial_message` with only `body`. The server's tool builds the few-shot prompt and calls OpenAI using credentials bound privately to this session.
 8. A strict boolean response becomes `Expenditure (true)` or `Other (false)` on the same saved card. Failures have their own status and safe error message. The original local handoff status and timings remain separate.
 
 The displayed receipt contains only `schema_version`, `received`, `message_id`, `character_count`, `python_version`, and `processed_at_utc`. `received: true` means Python accepted the handoff; it does **not** mean the SMS is a financial transaction. Sender and message body are not echoed in this receipt.
@@ -36,6 +36,26 @@ The displayed receipt contains only `schema_version`, `received`, `message_id`, 
 `Handoff time` measures the SMS bridge call, including waiting for its shared lock and Python startup when needed. It excludes SMS delivery, receiver setup, and the receiver executor. Each newly captured SMS also shows the stage breakdown described under [SMS bottleneck measurements](#sms-bottleneck-measurements). The Python function does not print, and message content is not logged.
 
 See the repository README's [current implementation flow](../README.md#current-implementation-sms-and-app-chat) for a diagram showing where the tests enter the chat and SMS flows, and [test execution diagram](../README.md#how-you-run-the-checks) for how the runners execute them. Tests are started by the developer, separately from normal app use.
+
+## Phone-side MCP tools
+
+`phone_mcp_server.py` publishes two implemented tools: `get_help()` and `classify_financial_message(body)`. The latter owns prompt creation **and** the hosted LLM call. `phone_tools.py` implements these capabilities; `expenditure_classifier.py` retains the instructions, few-shot request builder, HTTPS client, and strict boolean parser. These helpers are not separate tools. No category/validation/training/database stubs are advertised.
+
+`phone_mcp_client.py` is the boundary used by the orchestrator. Each call creates an isolated session and exchanges serialized JSON-RPC messages in this order:
+
+1. `initialize`: negotiate MCP `2025-11-25` and the tools capability.
+2. `notifications/initialized`: finish the handshake; no response is emitted.
+3. `tools/list`: discover the tools and their JSON Schemas.
+4. `tools/call`: send the selected tool name and arguments.
+5. Validate the structured result and close the transport, clearing the server's credential reference.
+
+The Android transport is a **custom in-memory transport**: the client sends a JSON string to the server's `exchange` method and parses its JSON response. It is not an HTTP server or a direct business-function call. The app uses a small standard-library tools-only implementation, not the official MCP SDK; this keeps the APK free of additional SDK/native-package dependencies. It supports lifecycle, ping, discovery, tool calls, JSON-RPC errors, and structured results, not resources, MCP prompt endpoints, sampling, tasks, progress, concurrent cancellation, or a general JSON Schema engine. MCP allows [custom transports preserving JSON-RPC and lifecycle](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports#custom-transports); the tool messages follow the [tools specification](https://modelcontextprotocol.io/specification/2025-11-25/server/tools).
+
+The server validates these two known input schemas, and the client validates their known successful outputs. Tool execution failures use `isError: true` with a safe error code and no expenditure decision; invalid protocol requests use JSON-RPC errors. Successful classification returns `{ "is_expenditure": true/false, "api_elapsed_ms": number }`. The boolean is the model's decision; timing is tool metadata, not another prediction.
+
+The app's API key and model are bound to private server context, never MCP arguments, tool metadata, saved jobs, or results. Existing Android permission/cloud-consent checks remain before calling Python. The orchestrator still selects tools in code; MCP exposure does **not** introduce autonomous LLM tool selection, an agent loop, or model training. SMS receipt validation remains a local transport acknowledgement.
+
+For optional desktop interoperability, this same server also supports newline-delimited **stdio**. An MCP host can launch it using your Python executable with `app/src/main/python/phone_mcp_server.py` as the argument, selecting protocol `2025-11-25`. It will wait on stdin; do not start it as a phone service. Help needs no credentials. Classification uses `OPENAI_API_KEY` and optionally `OPENAI_CLASSIFIER_MODEL` from the desktop host's private environment; never add a literal key to a committed host configuration. Android does not use these environment variables. Closing stdin closes the session.
 
 ## Open and build
 
@@ -115,7 +135,9 @@ Requests use verified HTTPS to a fixed endpoint, block redirects, set `store: fa
 
 ## Automated checks
 
-There are 26 Python unit tests on Windows and 14 Android checks: four bridge tests, one chat screen test, three performance checks, three classifier-contract checks, two isolated-store checks, and one consent-controls check. All input messages are synthetic. Offline tests mock API responses or use a missing key; they make no real API requests and prove no model accuracy. Tests do not read your inbox, send SMS, or clear the app's saved capture history. Storage tests use a separate synthetic cache directory, and consent tests use stub callbacks.
+The [Markdown testing wiki](../docs/wiki/Testing.md) provides a detailed suite-by-suite guide, commands, timing boundaries, coverage limits, and troubleshooting.
+
+There are 43 Python unit tests on Windows and 16 Android checks: four bridge tests, one chat screen test, three performance checks, five classifier/MCP-contract checks, two isolated-store checks, and one consent-controls check. All input messages are synthetic. Offline tests mock API responses or use a missing key; they make no real API requests and prove no model accuracy. Tests do not read your inbox, send SMS, or clear the app's saved capture history. Storage tests use a separate synthetic cache directory, and consent tests use stub callbacks.
 
 ### Python unit tests on Windows
 
@@ -137,7 +159,15 @@ python -m unittest discover -s python-tests -p "test_*.py" -v
 
 Run that second block from `android-companion`; ensure `py -3.11 --version` works first. The repository's `.venv` ignore rule excludes environments named `.venv`; this companion also ignores `.venv-tests`.
 
-The test runner imports the same production Python that goes into the APK. Nine SMS tests verify receipts, required fields, invalid input, Unicode, timestamps, and safe output. Four chat tests verify help replies and errors. Thirteen classifier tests check the few-shot schema, real booleans, mocked requests across all 34 sanitized cases, refusal/incomplete responses, safe errors, missing credentials, limits, and blocked redirects. Each `test_...` method runs independently; `subTest` checks variants. Mocking the provider proves the workflow handles labels correctly, not that a live model predicts them correctly. Android checks verify the packaged Python boundary separately.
+The test runner imports the same production Python that goes into the APK. Nine SMS tests verify receipts, required fields, invalid input, Unicode, timestamps, and safe output. Four chat tests verify help replies and errors. Thirteen classifier tests check the few-shot schema, real booleans, mocked requests across all 34 sanitized cases, refusal/incomplete responses, safe errors, missing credentials, limits, and blocked redirects. Seventeen tests in `python-tests/test_phone_mcp.py` check initialization, discovery, schemas, real serialized calls, protocol/tool errors, private credentials, independent/closed sessions, malformed outputs, stdio, and input limits. Each `test_...` method runs independently; `subTest` checks variants. Mocking the provider proves the workflow handles labels correctly, not that a live model predicts them correctly. Android checks verify the packaged Python boundary separately.
+
+An optional desktop compatibility check uses the official Python MCP SDK **2.x already installed in the repository environment**, not in the APK or standard-library unit suite:
+
+```powershell
+python python-tests/check_mcp_interop.py
+```
+
+It connects to the real server over stdio in legacy-handshake mode, discovers both tools, calls help, and tests missing-key failure with an explicitly empty key. It makes no paid API calls and is never run by unittest discovery. It is a basic interoperability check, not full MCP conformance certification.
 
 For an **optional paid model evaluation**, set `OPENAI_API_KEY` privately in your terminal environment (do not commit it or put the literal key in shared instructions), then run from `android-companion`:
 
@@ -167,6 +197,8 @@ The four bridge tests call embedded Python with synthetic SMS/chat messages. The
 
 Verification on October 2, 2026: all 26 Python unit tests passed in the project's Windows Python 3.11.9 environment, and all 14 Android checks passed on the Pixel 7a running Android 17. The debug app/test APK builds and Android lint passed; the updated APK was installed over the existing app without clearing captured history. No paid API calls were made during those automated checks. On October 3, the user reported successful live classification on the phone; no counted accuracy evaluation or live latency results were supplied. A broader evaluation can use the optional paid script or more phone checks. The optional host timing command still benchmarks `handle_sms`, not chat or hosted classification.
 
+MCP update verification on October 3: **43 Python tests and 16 Android checks passed**, as did debug app/test APK builds, Android lint, and the optional official-SDK stdio compatibility check. Version `0.5.0-phone-mcp-tools` was installed on the Pixel over the existing app without clearing storage. No paid API calls were made. The hosted request/parser is unchanged, but the newly routed MCP path still needs a live synthetic SMS check. Reopen the app, re-enter the memory-only key/consent, and follow the cloud-classification demo steps; test/install process restarts cannot retain those credentials.
+
 To run all six application test classes from PowerShell, from `android-companion`:
 
 ```powershell
@@ -174,7 +206,7 @@ $env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'
 .\gradlew.bat :app:connectedDebugAndroidTest '-Pandroid.testInstrumentationRunnerArguments.class=com.abijith.expensetracker.PythonBridgeInstrumentedTest,com.abijith.expensetracker.ChatScreenInstrumentedTest,com.abijith.expensetracker.SmsPerformanceInstrumentedTest,com.abijith.expensetracker.ClassifierInstrumentedTest,com.abijith.expensetracker.ClassificationStoreInstrumentedTest,com.abijith.expensetracker.CloudControlsInstrumentedTest'
 ```
 
-Use a development device/emulator: Android test tooling installs development APKs and may restart the app. These tests cover the bridges, basic chat/consent controls, and isolated classification-store recovery. Actual SMS delivery, permission dialogs, end-to-end WorkManager scheduling, cloud inference, capture controls, and usability still need manual checks. Android Studio's generated sample tests are retained locally but excluded from Git; they do not verify app behavior. GitHub Actions is not configured yet; these suites run locally.
+Use a development device/emulator: Android test tooling installs development APKs and may restart the app. These tests cover the bridges, basic chat/consent controls, and isolated classification-store recovery. Actual SMS delivery, permission dialogs, end-to-end WorkManager scheduling, cloud inference, capture controls, and usability still need manual checks. Android Studio's generated sample tests have been removed; only tests of the actual implementation remain. GitHub Actions is not configured yet; these suites run locally.
 
 ## SMS bottleneck measurements
 
@@ -224,7 +256,7 @@ The first bridge call in that separate timing-build performance-suite run actual
 
 Use synthetic messages that contain no personal details or verification codes.
 
-1. Install the updated APK using Android Studio **Run**. Send a message in **Chat**, check the help reply, then select **SMS capture** and check that it says `Milestone 4: expenditure classification`. Leave cloud off for the capture-only checks.
+1. Install the updated APK using Android Studio **Run**. Send a message in **Chat**, check the help reply mentioning the MCP tools, then select **SMS capture** and check that it says `Milestone 5: phone-side MCP tools`. Leave cloud off for the capture-only checks.
 2. Enable capture and grant SMS permission if needed.
 3. Send `Demo purchase: Rs 120 at Cafe Example.` as an ordinary SMS from another phone.
 4. Check that one message card shows `Python: Acknowledged`, a handoff time, and a receipt with `received: true` and `python_version` starting with `3.11`. `Pending` may disappear too quickly to observe.
@@ -286,4 +318,4 @@ These files are under `app/src/main/java/com/abijith/expensetracker/`:
 | `SmsClassificationWorker.kt` | Network-constrained background inference, consent/permission checks, scheduling, cancellation, and guarded result updates. |
 | `SmsStore.kt` | Atomically stores capture state and bounded history in `noBackupFilesDir`; updates handoff results on the existing message and prevents stale updates after pause/clear. |
 
-The Python entry point is [`orchestrator.py`](app/src/main/python/orchestrator.py). `handle_sms(payload_json)` returns the local receipt; `handle_chat(payload_json)` returns local help; `classify_sms(payload_json, api_key, model)` invokes the hosted classifier. [`expenditure_classifier.py`](app/src/main/python/expenditure_classifier.py) builds the prompt/schema, sends one HTTPS request, and validates the boolean. [`classifier_examples.py`](app/src/main/python/classifier_examples.py) contains sanitized labelled examples. None records expenses or trains a model yet.
+The Python entry point is [`orchestrator.py`](app/src/main/python/orchestrator.py). `handle_sms(payload_json)` returns the local receipt; `handle_chat(payload_json)` calls MCP help; `classify_sms(payload_json, api_key, model)` calls MCP classification. [`phone_mcp_client.py`](app/src/main/python/phone_mcp_client.py) owns the serialized in-memory transport, handshake, discovery, calls, and result validation. [`phone_mcp_server.py`](app/src/main/python/phone_mcp_server.py) owns the tool catalogue/schemas, protocol lifecycle, input validation, safe errors, private context, and optional desktop stdio transport. [`phone_tools.py`](app/src/main/python/phone_tools.py) implements help and classification. [`expenditure_classifier.py`](app/src/main/python/expenditure_classifier.py) builds the prompt/schema, sends one HTTPS request, and validates the boolean. [`classifier_examples.py`](app/src/main/python/classifier_examples.py) contains sanitized labelled examples. None records expenses or trains a model yet.

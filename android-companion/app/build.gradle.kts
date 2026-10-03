@@ -14,8 +14,8 @@ android {
         applicationId = "com.abijith.expensetracker"
         minSdk = 26
         targetSdk = 37
-        versionCode = 5
-        versionName = "0.4.0-expenditure-classification"
+        versionCode = 6
+        versionName = "0.5.0-phone-mcp-tools"
 
         ndk {
             // Pixel 7a and 64-bit Windows-hosted Android emulators.
@@ -58,11 +58,9 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
-    implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.work.runtime)
     implementation(libs.androidx.lifecycle.runtime.ktx)
-    testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.espresso.core)
