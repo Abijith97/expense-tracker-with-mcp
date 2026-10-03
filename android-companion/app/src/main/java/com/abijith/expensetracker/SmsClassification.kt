@@ -13,6 +13,7 @@ data class SmsClassification(
     val apiElapsedMs: Double? = null,
     val errorCode: String? = null,
     val category: SmsCategory? = null,
+    val usage: LlmUsage? = null,
 ) {
     fun toJson(): JSONObject = JSONObject().put("status", status.name).put("attempt_id", attemptId).also {
         model?.let { value -> it.put("model", value) }
@@ -20,6 +21,7 @@ data class SmsClassification(
         apiElapsedMs?.let { value -> it.put("api_elapsed_ms", value) }
         errorCode?.let { value -> it.put("error_code", value) }
         category?.let { value -> it.put("category", value.toJson()) }
+        usage?.let { value -> it.put("usage", value.toJson()) }
     }
 
     companion object {
@@ -35,6 +37,7 @@ data class SmsClassification(
                 errorCode = json.optString("error_code").takeIf { it.isNotBlank() },
                 // Older saved classifications have no category; do not replay them.
                 category = json.optJSONObject("category")?.let(SmsCategory::fromJson),
+                usage = LlmUsage.fromJson(json.optJSONObject("usage")),
             )
         }
     }

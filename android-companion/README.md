@@ -1,6 +1,6 @@
 # Android app — category identification and separate API keys
 
-The Android application provides its own Chat tab alongside SMS capture diagnostics, stage timings, and optional hosted expenditure classification. The Python orchestrator and classifier run inside the APK. App version: `0.7.1-separate-api-keys` (`versionCode` 9).
+The Android application provides its own Chat tab alongside SMS capture diagnostics, stage timings, and optional hosted expenditure classification. The Python orchestrator and classifier run inside the APK. App version: `0.8.0-message-costs` (`versionCode` 10).
 
 Chat currently calls the local `app_help.get_help` function for every message, including what the app can do and which finance features are planned. Chat does not yet perform LLM inference, record expenses, or answer spending questions. SMS classification calls `expenditure_classifier.classify_expenditure` directly, which can call OpenAI after you enter two dedicated keys and consent. The app runs without a WhatsApp account, Twilio, ngrok, or a separately hosted application backend.
 
@@ -40,12 +40,13 @@ See the repository README's [current implementation flow](../README.md#current-i
 
 ## Python workflow and MCP decision
 
-The Python package now contains seven focused modules:
+The Python package now contains eight focused modules:
 
 - `orchestrator.py`: versioned SMS/chat entry points and the fixed processing workflow.
 - `expenditure_classifier.py`: expenditure prompt construction and strict boolean parsing.
 - `category_identifier.py`: category prompt construction and strict enum parsing.
 - `category_examples.py`: starter vocabulary and synthetic category examples.
+- `llm_usage.py`: safe token telemetry and supported USD cost calculations with dated rates.
 - `llm_api.py`: shared safe HTTPS transport and response-envelope parsing.
 - `classifier_examples.py`: sanitized few-shot and test examples.
 - `app_help.py`: local setup/capability text for the Chat tab.
@@ -119,6 +120,18 @@ Use each key exclusively for its matching app function. OpenAI's Costs API can f
 
 The app has no billing viewer and does not request organization Admin credentials. Read reported costs outside the app; do not install an Admin key on the phone. This update separates authentication/cost attribution, not models, token prices, or billing accounts. Keep optional terminal evaluation on a separate evaluation key to avoid mixing its charges with app-function costs.
 
+### Per-message calculated cost and bottleneck timings
+
+Each analysed SMS card now shows API-reported input/output tokens, cached input and cache-write tokens when supplied, a calculated USD cost per stage, and a combined **Calculated cost this attempt** when every required stage has a known estimate. Other messages require only classification; expenditures include the category call. This preserves the existing receiver, JSON encoding, Python startup/handoff, separate hosted-call, and total-analysis timings. Timings do not include SMS delivery or WorkManager scheduling wait.
+
+Costs include the whole request (instructions, examples, schema and SMS), not just the SMS text. Output usage already includes reasoning; it is not added again. The app requests `service_tier: default` and currently prices only the exact reported `gpt-5.6-luna` model on that reported tier, with rates verified **2026-10-03**. USD per million tokens: ordinary input **0.20**, cached input **0.02**, cache writes **0.25**, output **1.20**. Cache reads/writes are subtracted from total input before ordinary-input pricing. Requests above 272,000 input tokens use the documented full-request long-context premium. Rates/date are preserved with each estimate; update the pricing module when rates change. [Model/pricing documentation](https://developers.openai.com/api/docs/models/gpt-5.6-luna), [cache accounting](https://developers.openai.com/api/docs/guides/prompt-caching), [response usage fields](https://developers.openai.com/api/reference/python/resources/responses/methods/create).
+
+Missing or malformed usage, missing cache breakdown, an unknown model or tier, and network failures show **Unavailable**, not zero. Valid predictions remain valid even when telemetry is absent. Refused/incomplete/malformed model outputs retain usage and costs if the provider supplies them, and failures now retain measured call time. A category failure never erases the expenditure label or first-stage usage.
+
+These are calculated estimates, not provider-reported bills. They exclude account-specific adjustments, taxes and currency conversion. The latest attempt replaces the card's previous analysis; earlier retries, discarded/cancelled calls and messages evicted from the 20-card diagnostic history are not a spending audit. Never assume a timeout or missing usage means the request was free. Use the two dedicated keys and OpenAI's external cost reporting to reconcile totals; the app does not store Admin credentials or fetch billing records.
+
+For a manual check, re-enter both keys and consent, send a synthetic BMTC payment, and inspect two sets of tokens/costs plus the combined amount alongside timings. Send an advertising SMS and expect only classification cost with category skipped. Old cards still load without usage and are not uploaded automatically. Reclassifying them is an explicit new, potentially chargeable attempt.
+
 ### Classification status and timing
 
 The classifier considers a completed outgoing purchase/payment/debit/transfer an expenditure. Promotions, loan offers, EMI-conversion offers referring to old spending, incoming credits/refunds, balance-only updates, failed/reversed payments, OTPs, and ordinary messages count as Other. This is a prompt definition, not a claim of perfect model accuracy.
@@ -164,7 +177,7 @@ Compare actual predictions with your intended categories; these expectations are
 
 The [Markdown testing wiki](../docs/wiki/Testing.md) provides a detailed suite-by-suite guide, commands, timing boundaries, coverage limits, and troubleshooting.
 
-There are 41 Python unit tests on Windows and 24 Android checks: four bridge tests, one chat screen test, three performance checks, three classifier-contract checks, four category-contract/routing checks, three isolated-store checks, three consent/category-display checks, and three key settings/routing checks. All input messages are synthetic. Offline tests mock API responses or use a missing key; they make no real API requests and prove no model accuracy. Tests do not read your inbox, send SMS, or clear the app's saved capture history. Storage tests use a separate synthetic cache directory, and consent tests use stub callbacks.
+There are 51 Python unit tests on Windows and 29 Android checks: four bridge tests, one chat screen test, three performance checks, three classifier-contract checks, four category-contract/routing checks, three isolated-store checks, four consent/category/cost-display checks, three key settings/routing checks, and four usage/bridge/persistence/total checks. All input messages are synthetic. Offline tests mock API responses or use a missing key; they make no real API requests and prove no model accuracy. Tests do not read your inbox, send SMS, or clear the app's saved capture history. Storage tests use a separate synthetic cache directory, and consent tests use stub callbacks.
 
 ### Python unit tests on Windows
 
@@ -210,7 +223,7 @@ This reports median and 95th-percentile processing time for 100 calls after warm
 
 The UI tests use Espresso `3.7.0`, AndroidX JUnit `1.3.0`, and the test runner `1.7.0`. The template's Espresso `3.5.1` failed on Android 17 while reflecting on `InputManager.getInstance`; [Espresso 3.7.0's release notes](https://developer.android.com/jetpack/androidx/releases/test#espresso-3.7.0) document the change to use `getSystemService` instead.
 
-1. Open one of the eight test classes under `app/src/androidTest/java/com/abijith/expensetracker/` in Android Studio: `PythonBridgeInstrumentedTest`, `ChatScreenInstrumentedTest`, `SmsPerformanceInstrumentedTest`, `ClassifierInstrumentedTest`, `CategoryInstrumentedTest`, `ClassificationStoreInstrumentedTest`, or `CloudControlsInstrumentedTest`.
+1. Open one of the nine test classes under `app/src/androidTest/java/com/abijith/expensetracker/` in Android Studio: `PythonBridgeInstrumentedTest`, `ChatScreenInstrumentedTest`, `SmsPerformanceInstrumentedTest`, `ClassifierInstrumentedTest`, `CategoryInstrumentedTest`, `ClassificationStoreInstrumentedTest`, `CloudControlsInstrumentedTest`, `CloudKeysInstrumentedTest`, or `LlmUsageInstrumentedTest`.
 2. Connect your Pixel or start a supported emulator.
 3. Click the green run arrow beside the test class and choose **Run**. Android Studio installs the app and a separate test APK, then shows the results.
 
@@ -220,13 +233,13 @@ Verification on October 2, 2026: all 26 Python unit tests passed in the project'
 
 Direct-call update verification on October 3: **27 Python tests and 14 Android checks passed**, and the debug app/test APK builds and Android lint passed for version `0.6.0-direct-llm-classification`. The app and test APKs were installed on the Pixel 7a running Android 17 without clearing storage; all six classes passed through AndroidJUnitRunner. No paid API calls were made. The updated direct-call path still needs a live synthetic SMS check. Reopen the app and re-enter the memory-only key/consent after the test process restart.
 
-Two-key update verification on October 3: **41 Python tests and 24 Android checks passed**; debug app/test APK builds and lint passed. Version `0.7.1-separate-api-keys` was installed on the Pixel 7a running Android 17 without clearing storage. No paid API calls were made. Live category predictions still need your manual synthetic SMS check; re-enter both process-only keys and consent after test/install restarts.
+Per-message cost update verification on October 3: **51 Python tests and 29 Android checks passed**; debug app/test APK builds and lint passed. Version `0.8.0-message-costs` was installed on the Pixel 7a running Android 17 without clearing storage. No paid API calls were made. Live category predictions still need your manual synthetic SMS check; re-enter both process-only keys and consent after test/install restarts.
 
-To run all eight application test classes from PowerShell, from `android-companion`:
+To run all nine application test classes from PowerShell, from `android-companion`:
 
 ```powershell
 $env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'
-.\gradlew.bat :app:connectedDebugAndroidTest '-Pandroid.testInstrumentationRunnerArguments.class=com.abijith.expensetracker.PythonBridgeInstrumentedTest,com.abijith.expensetracker.ChatScreenInstrumentedTest,com.abijith.expensetracker.SmsPerformanceInstrumentedTest,com.abijith.expensetracker.ClassifierInstrumentedTest,com.abijith.expensetracker.CategoryInstrumentedTest,com.abijith.expensetracker.ClassificationStoreInstrumentedTest,com.abijith.expensetracker.CloudControlsInstrumentedTest,com.abijith.expensetracker.CloudKeysInstrumentedTest'
+.\gradlew.bat :app:connectedDebugAndroidTest '-Pandroid.testInstrumentationRunnerArguments.class=com.abijith.expensetracker.PythonBridgeInstrumentedTest,com.abijith.expensetracker.ChatScreenInstrumentedTest,com.abijith.expensetracker.SmsPerformanceInstrumentedTest,com.abijith.expensetracker.ClassifierInstrumentedTest,com.abijith.expensetracker.CategoryInstrumentedTest,com.abijith.expensetracker.ClassificationStoreInstrumentedTest,com.abijith.expensetracker.CloudControlsInstrumentedTest,com.abijith.expensetracker.CloudKeysInstrumentedTest,com.abijith.expensetracker.LlmUsageInstrumentedTest'
 ```
 
 Use a development device/emulator: Android test tooling installs development APKs and may restart the app. These tests cover the bridges, basic chat/consent controls, and isolated classification-store recovery. Actual SMS delivery, permission dialogs, end-to-end WorkManager scheduling, cloud inference, capture controls, and usability still need manual checks. Android Studio's generated sample tests have been removed; only tests of the actual implementation remain. GitHub Actions is not configured yet; these suites run locally.

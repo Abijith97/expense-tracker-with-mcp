@@ -51,13 +51,15 @@ object PythonBridge {
                 require(apiElapsedMs.isFinite() && apiElapsedMs >= 0)
                 SmsClassification(
                     if (result.getBoolean("is_expenditure")) ClassificationStatus.EXPENDITURE else ClassificationStatus.OTHER,
-                    attemptId, credentials.model, elapsedMs(startedAt), apiElapsedMs)
+                    attemptId, credentials.model, elapsedMs(startedAt), apiElapsedMs,
+                    usage = LlmUsage.fromJson(result.optJSONObject("usage")))
             } else {
                 require(status == "failed")
                 val code = result.getString("error_code")
                 val safeCode = safeInferenceCode(code)
                 SmsClassification(ClassificationStatus.FAILED, attemptId, credentials.model,
-                    elapsedMs(startedAt), errorCode = safeCode)
+                    elapsedMs(startedAt), apiElapsedMs = safeApiElapsedMs(result), errorCode = safeCode,
+                    usage = LlmUsage.fromJson(result.optJSONObject("usage")))
             }
         } catch (_: Exception) {
             SmsClassification(ClassificationStatus.FAILED, attemptId, credentials.model,
@@ -87,11 +89,14 @@ object PythonBridge {
                 require(name in SPENDING_CATEGORIES)
                 val apiElapsedMs = result.getDouble("api_elapsed_ms")
                 require(apiElapsedMs.isFinite() && apiElapsedMs >= 0)
-                SmsCategory(CategoryStatus.IDENTIFIED, name, elapsedMs(startedAt), apiElapsedMs)
+                SmsCategory(CategoryStatus.IDENTIFIED, name, elapsedMs(startedAt), apiElapsedMs,
+                    usage = LlmUsage.fromJson(result.optJSONObject("usage")))
             } else {
                 require(result.getString("status") == "failed")
                 SmsCategory(CategoryStatus.FAILED, elapsedMs = elapsedMs(startedAt),
-                    errorCode = safeInferenceCode(result.getString("error_code")))
+                    apiElapsedMs = safeApiElapsedMs(result),
+                    errorCode = safeInferenceCode(result.getString("error_code")),
+                    usage = LlmUsage.fromJson(result.optJSONObject("usage")))
             }
         } catch (_: Exception) {
             SmsCategory(CategoryStatus.FAILED, elapsedMs = elapsedMs(startedAt), errorCode = "processing")
@@ -99,6 +104,9 @@ object PythonBridge {
             SmsCategory(CategoryStatus.FAILED, elapsedMs = elapsedMs(startedAt), errorCode = "processing")
         }
     }
+
+    private fun safeApiElapsedMs(result: JSONObject): Double? =
+        result.optDouble("api_elapsed_ms", Double.NaN).takeIf { it.isFinite() && it >= 0 }
 
     private fun safeInferenceCode(code: String): String = code.takeIf {
         it in setOf("configuration", "authentication", "access_denied", "request_rejected",

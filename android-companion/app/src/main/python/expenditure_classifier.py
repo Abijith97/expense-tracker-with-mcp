@@ -10,6 +10,7 @@ import time
 
 from classifier_examples import PROMPT_EXAMPLES
 from llm_api import InferenceError as ClassificationError, parse_output, send_request
+from llm_usage import read_usage
 
 DEFAULT_MODEL = "gpt-5.6-luna"
 MAX_BODY_CHARS = 12000
@@ -42,7 +43,7 @@ def build_request(body, model=DEFAULT_MODEL):
     inputs.append({"role": "user", "content": body})
     request = {
         "model": model.strip(), "instructions": INSTRUCTIONS, "input": inputs,
-        "store": False, "max_output_tokens": 128,
+        "store": False, "max_output_tokens": 128, "service_tier": "default",
         "text": {"format": {
             "type": "json_schema", "name": "expenditure_classification", "strict": True,
             "schema": {"type": "object", "properties": {"is_expenditure": {"type": "boolean"}},
@@ -63,7 +64,7 @@ def parse_response(response):
     return result["is_expenditure"]
 
 
-def classify_expenditure(body, api_key, model=DEFAULT_MODEL):
+def classify_expenditure(body, api_key, model=DEFAULT_MODEL, *, metrics=None):
     """Use verified HTTPS, a 20-second socket timeout, and no automatic retries.
 
     Timeout is per blocking socket operation, not a hard end-to-end deadline.
@@ -71,5 +72,14 @@ def classify_expenditure(body, api_key, model=DEFAULT_MODEL):
     """
     payload = build_request(body, model)
     started = time.perf_counter()
-    decision = parse_response(send_request(payload, api_key))
-    return decision, (time.perf_counter() - started) * 1000
+    try:
+        response = send_request(payload, api_key)
+        usage = read_usage(response, payload["model"])
+        if metrics is not None and usage is not None:
+            metrics["usage"] = usage
+        decision = parse_response(response)
+        return decision, (time.perf_counter() - started) * 1000
+    finally:
+        # A refused/incomplete result may still report billable tokens.
+        if metrics is not None:
+            metrics["api_elapsed_ms"] = (time.perf_counter() - started) * 1000

@@ -10,6 +10,7 @@ import time
 from category_examples import CATEGORIES, PROMPT_EXAMPLES
 from expenditure_classifier import DEFAULT_MODEL, MAX_BODY_CHARS
 from llm_api import InferenceError as CategoryError, parse_output, send_request
+from llm_usage import read_usage
 
 INSTRUCTIONS = """Suggest one spending category for a completed outgoing transaction SMS.
 The earlier expenditure check is separate; your only task is category identification.
@@ -48,7 +49,7 @@ def build_request(body, model=DEFAULT_MODEL):
     inputs.append({"role": "user", "content": body})
     request = {
         "model": model.strip(), "instructions": INSTRUCTIONS, "input": inputs,
-        "store": False, "max_output_tokens": 128,
+        "store": False, "max_output_tokens": 128, "service_tier": "default",
         "text": {"format": {
             "type": "json_schema", "name": "spending_category", "strict": True,
             "schema": {"type": "object", "properties": {
@@ -70,9 +71,17 @@ def parse_response(response):
     return result["category"]
 
 
-def identify_category(body, api_key, model=DEFAULT_MODEL):
+def identify_category(body, api_key, model=DEFAULT_MODEL, *, metrics=None):
     """One hosted category call, returning (validated category, API elapsed ms)."""
     payload = build_request(body, model)
     started = time.perf_counter()
-    category = parse_response(send_request(payload, api_key))
-    return category, (time.perf_counter() - started) * 1000
+    try:
+        response = send_request(payload, api_key)
+        usage = read_usage(response, payload["model"])
+        if metrics is not None and usage is not None:
+            metrics["usage"] = usage
+        category = parse_response(response)
+        return category, (time.perf_counter() - started) * 1000
+    finally:
+        if metrics is not None:
+            metrics["api_elapsed_ms"] = (time.perf_counter() - started) * 1000

@@ -6,17 +6,17 @@ This is repository-hosted Markdown wiki documentation under `docs/wiki/`, not a 
 
 ## Scope and current verification
 
-Last verified: **October 3, 2026**. The current build is `0.7.1-separate-api-keys`. Python tests, debug APK builds, and lint were verified on Windows with Python 3.11.9. All eight Android test classes passed on the Pixel 7a running Android 17 through AndroidJUnitRunner after installing the app/test APKs without clearing storage.
+Last verified: **October 3, 2026**. The current build is `0.8.0-message-costs`. Python tests, debug APK builds, and lint were verified on Windows with Python 3.11.9. All nine Android test classes passed on the Pixel 7a running Android 17 through AndroidJUnitRunner after installing the app/test APKs without clearing storage.
 
 | Check | Last verified result | What it establishes |
 | --- | --- | --- |
-| Python unit suite | 41 tests passed | Python input/output contracts, strict boolean/category parsing, shared transport safety, and mocked inference. |
-| Android integration/UI suite | 24 tests passed | Packaged Python, expenditure-only routing, category/consent UI, legacy/new isolated storage, and timing contracts work on the phone. This does not verify live SMS delivery or hosted predictions. |
+| Python unit suite | 51 tests passed | Python input/output contracts, strict boolean/category parsing, safe token/cost telemetry, shared transport safety, and mocked inference. |
+| Android integration/UI suite | 29 tests passed | Packaged Python, expenditure-only routing, category/consent/cost UI, usage totals, legacy/new isolated storage, and timing contracts work on the phone. This does not verify live SMS delivery or hosted predictions. |
 | Debug application and test APK builds | Passed | The Android source, resources, dependencies, and embedded Python package build together. |
 | Android lint | Passed | No lint errors and no remaining unused-resource warnings. Other warnings remain; this is not a claim of zero warnings. |
 | Live category suggestions | Needs a manual synthetic SMS check | Automated checks do not contact OpenAI with a valid key or establish category accuracy. |
 
-**Source version:** this guide accompanies the `0.7.1-separate-api-keys` update with 41 Python and 24 Android checks. Commit `c55c370` contains the prior direct-classification build with 27/14 checks. The older MCP experiment in `22b14ee` had 43/16 checks; its MCP-only files were intentionally removed. Use the matching source version when comparing test totals.
+**Source version:** this guide accompanies the `0.8.0-message-costs` update with 51 Python and 29 Android checks. Commit `79704f8` contains the prior two-key/category build with 41/24 checks. Commit `c55c370` contains the prior direct-classification build with 27/14 checks. The older MCP experiment in `22b14ee` had 43/16 checks; its MCP-only files were intentionally removed. Use the matching source version when comparing test totals.
 
 There is no configured GitHub Actions workflow. A Git push does not currently execute these tests. Android Studio and Gradle are test runners; GitHub Actions could automate selected checks later.
 
@@ -40,7 +40,7 @@ The tests enter these stages independently:
 | Performance measurements | Separate benchmarks measure JSON serialization and local handoff stages. |
 | Actual SMS delivery and hosted predictions | Manual checks and the explicitly invoked paid evaluation. |
 
-## Python unit tests: 41 checks
+## Python unit tests: 51 checks
 
 All Python unit files are under `android-companion/python-tests/`. They import the same Python source that is packaged in the APK, under `android-companion/app/src/main/python/`.
 
@@ -49,6 +49,7 @@ All Python unit files are under `android-companion/python-tests/`. They import t
 | `test_orchestrator.py` | 9 | SMS acknowledgement, required fields, malformed JSON, invalid types, nonnegative timestamps, Unicode code-point counts, and a receipt that does not echo the sender/body. |
 | `test_chat.py` | 4 | Correlated capability replies, required fields, invalid types/blank input, generic errors, and no echo of private chat input. |
 | `test_classifier.py` | 14 | Positive/negative few-shot examples, strict boolean schema, genuine booleans rather than truthy strings/numbers, malformed/refused/incomplete model output, input limits, missing credentials, mocked HTTPS settings, blocked redirects, safe HTTP/network errors, direct classifier routing, and rejection of malformed direct-call decisions/timings. |
+| `test_usage.py` | 10 | Cached/cache-write accounting, no reasoning double-counting, long-context threshold, unknown prices/counts, safe telemetry, both real entry points, standard tier, reported costs on failed outputs, and timing without usage after network failure. |
 | `test_category.py` | 14 | Category enum and synthetic few-shot examples, uncertainty/untrusted-text instructions, model overrides, strict parser, safe errors/transport settings, missing keys, correlated results, and malformed category/timing rejection. |
 
 Each `test_...` method counts as one test. Methods may use `subTest` to cover several inputs; those variants are not extra methods in the reported total.
@@ -84,7 +85,7 @@ To run just the classifier tests, from `android-companion`:
 python -m unittest discover -s python-tests -p "test_classifier.py" -v
 ```
 
-Success ends with `Ran 41 tests` and `OK` for the full current suite. A failure includes the test name and failed assertion; `ERROR` usually means an exception or import/setup problem. Read the failure, fix the implementation or incorrect test expectation, and rerun that suite before rerunning everything.
+Success ends with `Ran 51 tests` and `OK` for the full current suite. A failure includes the test name and failed assertion; `ERROR` usually means an exception or import/setup problem. Read the failure, fix the implementation or incorrect test expectation, and rerun that suite before rerunning everything.
 
 To run just category tests:
 
@@ -92,7 +93,7 @@ To run just category tests:
 python -m unittest discover -s python-tests -p "test_category.py" -v
 ```
 
-## Android integration and UI tests: 24 checks
+## Android integration and UI tests: 29 checks
 
 Files are under `android-companion/app/src/androidTest/java/com/abijith/expensetracker/`. The tests run in a separate test APK on a development phone or emulator, using AndroidJUnitRunner and Compose UI testing.
 
@@ -103,7 +104,8 @@ Files are under `android-companion/app/src/androidTest/java/com/abijith/expenset
 | `SmsPerformanceInstrumentedTest.kt` | 3 | JSON serialization benchmarks for short/long/Unicode messages, warm bridge-stage benchmarks, and persisted timing-format round-tripping. |
 | `ClassifierInstrumentedTest.kt` | 3 | Missing-key failure is never Other, packaged parser preserves true/false, and timing/status serialization recovers abandoned Running as Interrupted. |
 | `ClassificationStoreInstrumentedTest.kt` | 3 | Prevent duplicate/stale attempts, verify next-stage eligibility after pause/clear, persist category results on the original message, and recover abandoned Running attempts as Interrupted. |
-| `CloudControlsInstrumentedTest.kt` | 3 | Two-key/consent controls with stub callbacks, category suggestions/uncertainty/failures with separate expenditure status, and skipped-category UI for Other. |
+| `CloudControlsInstrumentedTest.kt` | 4 | Two-key/consent controls with stub callbacks, category suggestions/uncertainty/failures with separate expenditure status, and skipped-category UI for Other, and cost/token display alongside preserved timings with unavailable totals for missing category usage. |
+| `LlmUsageInstrumentedTest.kt` | 4 | Safe telemetry parsing, old/new result persistence, both stage timings, complete/unknown cost totals, and packaged Python telemetry with shared mocked transport aliases and HTTP forbidden. |
 | `CloudKeysInstrumentedTest.kt` | 3 | Reject missing/equal/malformed keys or absent consent, keep both keys out of public state/results, invalidate prior sessions, and verify dedicated key routing through packaged Python with mocked helpers and HTTP prohibited. |
 | `CategoryInstrumentedTest.kt` | 4 | Packaged category parser/vocabulary matches Kotlin, safe missing-key failure preserves Expenditure, conditional/cancelled routing, and legacy/new result serialization. |
 
@@ -113,24 +115,30 @@ The storage tests override the store location with a unique synthetic cache dire
 
 1. Open `android-companion` in Android Studio and let Gradle sync finish.
 2. Connect a development Pixel or start a compatible emulator.
-3. Open one of the eight test classes above.
+3. Open one of the nine test classes above.
 4. Click the green run arrow beside the class and choose **Run**.
 5. Inspect the test results and any failed assertion.
 
 The tooling builds/installs the app and test APK and may restart the application. Both keys and cloud consent are process-memory-only, so re-enter both keys and consent before a later live classification demo. Updating with the same debug signing key does not require uninstalling or clearing storage.
 
-### Run all eight classes from PowerShell
+### Run all nine classes from PowerShell
 
 From `android-companion`, with Android Studio's JDK installed:
 
 ```powershell
 $env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'
-.\gradlew.bat :app:connectedDebugAndroidTest '-Pandroid.testInstrumentationRunnerArguments.class=com.abijith.expensetracker.PythonBridgeInstrumentedTest,com.abijith.expensetracker.ChatScreenInstrumentedTest,com.abijith.expensetracker.SmsPerformanceInstrumentedTest,com.abijith.expensetracker.ClassifierInstrumentedTest,com.abijith.expensetracker.CategoryInstrumentedTest,com.abijith.expensetracker.ClassificationStoreInstrumentedTest,com.abijith.expensetracker.CloudControlsInstrumentedTest,com.abijith.expensetracker.CloudKeysInstrumentedTest'
+.\gradlew.bat :app:connectedDebugAndroidTest '-Pandroid.testInstrumentationRunnerArguments.class=com.abijith.expensetracker.PythonBridgeInstrumentedTest,com.abijith.expensetracker.ChatScreenInstrumentedTest,com.abijith.expensetracker.SmsPerformanceInstrumentedTest,com.abijith.expensetracker.ClassifierInstrumentedTest,com.abijith.expensetracker.CategoryInstrumentedTest,com.abijith.expensetracker.ClassificationStoreInstrumentedTest,com.abijith.expensetracker.CloudControlsInstrumentedTest,com.abijith.expensetracker.CloudKeysInstrumentedTest,com.abijith.expensetracker.LlmUsageInstrumentedTest'
 ```
 
-Gradle reports failures and writes connected-test reports under `app/build/reports/androidTests/connected/`. If running through ADB directly, inspect the test-runner result (`OK (24 tests)`), not just the shell exit code.
+Gradle reports failures and writes connected-test reports under `app/build/reports/androidTests/connected/`. If running through ADB directly, inspect the test-runner result (`OK (29 tests)`), not just the shell exit code.
 
 Generated `ExampleUnitTest` and `ExampleInstrumentedTest` were removed; they were template examples, not meaningful application coverage.
+
+## Per-message cost verification
+
+The ten Python usage tests use synthetic provider counts and published-rate arithmetic, not real bills. Android tests verify telemetry crossing the packaged Python bridge, display, persisted round-tripping, and totals without erasing timings or valid predictions. Missing telemetry is never labelled free. Existing three bottleneck/performance tests remain unchanged.
+
+The current estimator supports only the exact default model and standard tier, with dated rates. See the [cost and timing design](../../android-companion/README.md#per-message-calculated-cost-and-bottleneck-timings) for cache-write accounting, unsupported pricing, failures, retry/history limitations and manual checks. A live model call and external billing reconciliation remain manual, explicitly chargeable steps; no Admin key belongs in the APK.
 
 ## Build and lint checks
 
@@ -222,7 +230,7 @@ Transaction-detail extraction, category confirmation/correction, financial datab
 
 | Symptom | Check |
 | --- | --- |
-| Unexpected test counts | Current source defines 41 Python and 24 Android checks. The direct-classifier predecessor had 27/14, and the retired MCP experiment had 43/16. Check the source-version note above. |
+| Unexpected test counts | Current source defines 51 Python and 29 Android checks. The direct-classifier predecessor had 27/14, and the retired MCP experiment had 43/16. Check the source-version note above. |
 | Python not found / activation fails | Select a working Python 3.11 environment; use its executable directly if activation is blocked. |
 | No connected device | Enable USB debugging, approve the connection, and select the Pixel/emulator in Android Studio. |
 | Android build or Python bytecode compilation fails | Check the configured JDK, SDK components, Gradle sync, and build-time Python 3.11 matching the APK runtime. |

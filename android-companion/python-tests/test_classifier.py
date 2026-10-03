@@ -10,7 +10,7 @@ import socket
 import sys
 import unittest
 import urllib.error
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app/src/main/python"))
 import expenditure_classifier as classifier
@@ -139,7 +139,7 @@ class ExpenditureClassifierTests(unittest.TestCase):
                 self.assertIs(result["is_expenditure"], decision)
                 self.assertEqual(result["message_id"], "demo-id")
                 self.assertEqual(result["api_elapsed_ms"], 12.5)
-                call.assert_called_once_with("Sent Rs.120 to Example Shop.", "DEMO-KEY", classifier.DEFAULT_MODEL)
+                call.assert_called_once_with("Sent Rs.120 to Example Shop.", "DEMO-KEY", classifier.DEFAULT_MODEL, metrics=ANY)
                 self.assertNotIn("DEMO-PRIVATE-SENDER", json.dumps(result))
                 self.assertNotIn("DEMO-KEY", json.dumps(result))
                 self.assertNotIn("Sent Rs", json.dumps(result))

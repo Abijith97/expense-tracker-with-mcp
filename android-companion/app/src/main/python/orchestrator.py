@@ -87,8 +87,9 @@ def classify_sms(payload_json: str, api_key: str, model: str = DEFAULT_MODEL) ->
     receipt = json.loads(handle_sms(payload_json))
     payload = json.loads(payload_json)
     result = {"schema_version": 1, "message_id": receipt["message_id"]}
+    metrics = {}
     try:
-        decision, elapsed = classify_expenditure(payload["body"], api_key, model)
+        decision, elapsed = classify_expenditure(payload["body"], api_key, model, metrics=metrics)
         # Preserve the Android output contract without a tool-protocol layer.
         # Truthy strings and invalid timing values must never become decisions.
         if (type(decision) is not bool or type(elapsed) not in (int, float)
@@ -97,6 +98,7 @@ def classify_sms(payload_json: str, api_key: str, model: str = DEFAULT_MODEL) ->
         result.update(status="classified", is_expenditure=decision, api_elapsed_ms=elapsed)
     except ClassificationError as error:
         result.update(status="failed", error_code=error.code)
+    result.update(metrics)
     return json.dumps(result)
 
 
@@ -109,14 +111,16 @@ def identify_sms_category(payload_json: str, api_key: str, model: str = DEFAULT_
     receipt = json.loads(handle_sms(payload_json))
     payload = json.loads(payload_json)
     result = {"schema_version": 1, "message_id": receipt["message_id"]}
+    metrics = {}
     try:
-        category, elapsed = identify_category(payload["body"], api_key, model)
+        category, elapsed = identify_category(payload["body"], api_key, model, metrics=metrics)
         if (type(category) is not str or category not in CATEGORIES
                 or type(elapsed) not in (int, float) or not math.isfinite(elapsed) or elapsed < 0):
             raise CategoryError("invalid_response")
         result.update(status="identified", category=category, api_elapsed_ms=elapsed)
     except CategoryError as error:
         result.update(status="failed", error_code=error.code)
+    result.update(metrics)
     return json.dumps(result)
 
 

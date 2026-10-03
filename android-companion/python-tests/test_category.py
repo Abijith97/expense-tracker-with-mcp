@@ -6,7 +6,7 @@ import socket
 import sys
 import unittest
 import urllib.error
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app/src/main/python"))
 import category_identifier as identifier
@@ -136,7 +136,7 @@ class CategoryIdentificationTests(unittest.TestCase):
                 result = json.loads(identify_sms_category(self.payload(), "DEMO-KEY"))
                 self.assertEqual(result, {"schema_version": 1, "message_id": "demo-category",
                     "status": "identified", "category": category, "api_elapsed_ms": 2.5})
-                call.assert_called_once_with("DEMO-PRIVATE-BODY", "DEMO-KEY", identifier.DEFAULT_MODEL)
+                call.assert_called_once_with("DEMO-PRIVATE-BODY", "DEMO-KEY", identifier.DEFAULT_MODEL, metrics=ANY)
                 self.assertNotIn("PRIVATE", json.dumps(result))
                 self.assertNotIn("DEMO-KEY", json.dumps(result))
 

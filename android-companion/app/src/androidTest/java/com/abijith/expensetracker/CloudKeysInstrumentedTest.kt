@@ -86,9 +86,9 @@ class CloudKeysInstrumentedTest {
             assertEquals(CategoryStatus.IDENTIFIED, category.status)
             assertEquals("Transport", category.name)
             mocked[1].callAttr("assert_called_once_with", message.body,
-                credentials.classificationApiKey, credentials.model)
+                credentials.classificationApiKey, credentials.model, Kwarg("metrics", mock.get("ANY")!!))
             mocked[2].callAttr("assert_called_once_with", message.body,
-                credentials.categoryApiKey, credentials.model)
+                credentials.categoryApiKey, credentials.model, Kwarg("metrics", mock.get("ANY")!!))
             mocked[0].callAttr("assert_not_called")
             val storedResults = expenditure.toJson().toString() + category.toJson().toString()
             assertFalse(storedResults.contains(credentials.classificationApiKey))

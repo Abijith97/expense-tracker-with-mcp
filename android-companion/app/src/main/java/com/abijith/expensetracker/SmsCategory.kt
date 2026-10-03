@@ -16,6 +16,7 @@ data class SmsCategory(
     val elapsedMs: Double? = null,
     val apiElapsedMs: Double? = null,
     val errorCode: String? = null,
+    val usage: LlmUsage? = null,
 ) {
     init {
         require(if (status == CategoryStatus.IDENTIFIED) name in SPENDING_CATEGORIES else name == null)
@@ -28,6 +29,7 @@ data class SmsCategory(
         elapsedMs?.let { value -> it.put("elapsed_ms", value) }
         apiElapsedMs?.let { value -> it.put("api_elapsed_ms", value) }
         errorCode?.let { value -> it.put("error_code", value) }
+        usage?.let { value -> it.put("usage", value.toJson()) }
     }
 
     companion object {
@@ -37,6 +39,7 @@ data class SmsCategory(
             elapsedMs = if (json.has("elapsed_ms")) json.getDouble("elapsed_ms") else null,
             apiElapsedMs = if (json.has("api_elapsed_ms")) json.getDouble("api_elapsed_ms") else null,
             errorCode = json.optString("error_code").takeIf { it.isNotBlank() },
+            usage = LlmUsage.fromJson(json.optJSONObject("usage")),
         )
     }
 }

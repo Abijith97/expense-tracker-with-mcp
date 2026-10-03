@@ -57,7 +57,7 @@ fun CloudClassificationControls(state: CloudClassificationState,
                     visualTransformation = PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth().testTag("cloud_category_key"))
                 Text("Use two different keys dedicated to these functions to separate OpenAI-reported " +
-                    "costs. This app does not display billing totals.",
+                    "costs. SMS cards show calculated per-attempt costs, not billing totals.",
                     style = MaterialTheme.typography.bodySmall)
                 OutlinedTextField(value = model, onValueChange = { model = it },
                     label = { Text("Model ID") }, singleLine = true, modifier = Modifier.fillMaxWidth())
@@ -107,6 +107,10 @@ fun SmsClassificationDetails(classification: SmsClassification?, canClassify: Bo
     classification?.apiElapsedMs?.let {
         Text("Expenditure API round trip and validation: ${String.format(Locale.US, "%.3f", it)} ms")
     }
+    if (classification?.status in setOf(ClassificationStatus.EXPENDITURE, ClassificationStatus.OTHER,
+            ClassificationStatus.FAILED, ClassificationStatus.INTERRUPTED)) {
+        LlmUsageDetails("Classification", classification?.usage)
+    }
     if (classification?.status == ClassificationStatus.EXPENDITURE) {
         val category = classification.category
         val categoryLabel = when (category?.status) {
@@ -123,12 +127,32 @@ fun SmsClassificationDetails(classification: SmsClassification?, canClassify: Bo
         category?.apiElapsedMs?.let {
             Text("Category API round trip and validation: ${String.format(Locale.US, "%.3f", it)} ms")
         }
+        LlmUsageDetails("Category", category?.usage)
     } else if (classification?.status == ClassificationStatus.OTHER) {
         Text("Category: Skipped (not an expenditure)")
+    }
+    if (classification != null && classification.status !in setOf(ClassificationStatus.WAITING, ClassificationStatus.RUNNING)) {
+        val total = analysisEstimatedCostUsd(classification)
+        Text(if (total != null) "Calculated cost this attempt: USD ${String.format(Locale.US, "%.8f", total)}"
+            else "Calculated cost this attempt: Unavailable (not assumed zero)")
+        Text("Calculated from reported tokens and supported rates, not a final bill. " +
+            "Latest attempt only; earlier retries and unknown charges are not included. " +
+            "Existing timing measurements remain separate.", style = MaterialTheme.typography.bodySmall)
     }
     if (canClassify && classification?.status !in setOf(ClassificationStatus.WAITING, ClassificationStatus.RUNNING)) {
         OutlinedButton(onClick = onClassify) {
             Text(if (classification == null) "Classify this message (uploads body)" else "Reclassify (uploads body)")
         }
     }
+}
+
+@Composable
+private fun LlmUsageDetails(stage: String, usage: LlmUsage?) {
+    Text(if (usage != null) "$stage tokens: input ${usage.inputTokens}, output ${usage.outputTokens}, " +
+        "cached ${usage.cachedInputTokens ?: "unknown"}, cache writes ${usage.cacheWriteTokens ?: "unknown"}"
+        else "$stage tokens: Unavailable")
+    Text(usage?.estimatedCostUsd?.let { "$stage calculated cost: USD ${String.format(Locale.US, "%.8f", it)}" }
+        ?: "$stage calculated cost: Unavailable")
+    usage?.pricingDate?.let { Text("$stage pricing: ${usage.model}, ${usage.serviceTier}, rates dated $it",
+        style = MaterialTheme.typography.bodySmall) }
 }

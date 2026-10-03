@@ -2,7 +2,7 @@
 
 An Android-only POC for learning LLM-powered workflows and orchestration, with MCP reserved for a possible future user chatbot. The application provides the chat interface and captures new SMS on the same phone.
 
-**Available today:** the app has a Chat tab and an SMS capture tab. Chat calls a local help function through embedded Python and displays its reply. SMS capture saves the latest 20 incoming messages and displays Python's acknowledgement plus stage timings. Optional hosted classification calls the Python classifier directly to label messages **Expenditure** or **Other**, with separate inference timings. Expenditures then get a second hosted call to suggest a spending category or return **Not sure**, displayed on the same card. App version: `0.7.1-separate-api-keys`.
+**Available today:** the app has a Chat tab and an SMS capture tab. Chat calls a local help function through embedded Python and displays its reply. SMS capture saves the latest 20 incoming messages and displays Python's acknowledgement plus stage timings. Optional hosted classification calls the Python classifier directly to label messages **Expenditure** or **Other**, with separate inference timings. Expenditures then get a second hosted call to suggest a spending category or return **Not sure**, displayed on the same card. Cards also show reported token usage and calculated per-attempt USD costs when supported, alongside all existing bottleneck timings. App version: `0.8.0-message-costs`.
 
 **Still planned:** transaction-detail extraction, expense storage, category confirmation/correction, and LLM chat answers. Every current chat message returns capability information; it does not yet interpret questions or record expenses.
 
@@ -36,6 +36,7 @@ MCP can be reconsidered when the future chatbot selects reusable tools such as r
 | `expenditure_classifier.py` | Build the expenditure prompt and parse a strict boolean or raise a safe error. |
 | `category_identifier.py` | Build a separate category prompt and return one allowed category or Not sure; failures are separate. |
 | `category_examples.py` | Starter category vocabulary and synthetic labelled examples, not user-confirmed feedback or training. |
+| `llm_usage.py` | Whitelist reported token counts and calculate supported standard-tier USD estimates without logging private data. |
 | `llm_api.py` | Shared HTTPS transport and response-envelope parsing for both inference stages. |
 | `classifier_examples.py` | Sanitized labelled examples used by the prompt and offline tests. |
 | `app_help.py` | Local capability/setup text; no network, credentials, or expense writes. |
@@ -54,15 +55,27 @@ Category failures are separate from expenditure classification. An expense-label
 
 This adds a second API call/body upload, cost, and sequential latency for expenditures; Other messages use one call. Total analysis processing includes both stages; expenditure and category API timings are displayed separately. No human confirmation, transaction extraction, training, or expense insertion is included yet.
 
-Verification for `0.7.1-separate-api-keys`: **41 offline Python tests and 24 Android checks passed**; debug app/test APK builds and lint passed. The APK was installed on the Pixel 7a running Android 17 without clearing storage. No paid API calls were made; live category predictions still need a manual synthetic SMS check.
+Verification for `0.8.0-message-costs`: **51 offline Python tests and 29 Android checks passed**; debug app/test APK builds and lint passed. The APK was installed on the Pixel 7a running Android 17 without clearing storage. No paid API calls were made; live category predictions still need a manual synthetic SMS check.
 
 ## Cost attribution: two dedicated API keys
 
 Create two different OpenAI keys named `financial-classification` and `category-identification`, then enter them in their matching masked fields under SMS capture. Both are required with upload consent; using the same key twice is rejected. The expenditure bridge passes only the classification key, and the category bridge passes only the category key. Both stages keep the shared model setting and existing prompts. Capture and local chat use neither key.
 
-Use each key exclusively for its matching functionality. OpenAI's Costs API supports `api_key_ids` filtering and `group_by=api_key_id` in daily buckets, so the provider-reported monetary totals can be attributed to each functionality. This is not an immediate per-SMS bill; the app currently displays timings, not tokens or billing totals. [Official OpenAI Costs documentation](https://developers.openai.com/api/reference/resources/admin/subresources/organization/subresources/usage/methods/costs).
+Use each key exclusively for its matching functionality. OpenAI's Costs API supports `api_key_ids` filtering and `group_by=api_key_id` in daily buckets, so the provider-reported monetary totals can be attributed to each functionality. This is not an immediate per-SMS bill; the app displays tokens, calculated costs and timings, but does not retrieve billing totals. [Official OpenAI Costs documentation](https://developers.openai.com/api/reference/resources/admin/subresources/organization/subresources/usage/methods/costs).
 
 Keys remain process-memory-only and are forgotten when cloud is disabled or the process ends. Do not enter an organization Admin key in the phone app. Creating two keys does not change token prices or give each feature a separate billing account. Optional external evaluation must use a separate evaluation key if its cost should not be mixed with app usage.
+
+### Per-message calculated cost and bottleneck timings
+
+Each analysed SMS card now shows API-reported input/output tokens, cached input and cache-write tokens when supplied, a calculated USD cost per stage, and a combined **Calculated cost this attempt** when every required stage has a known estimate. Other messages require only classification; expenditures include the category call. This preserves the existing receiver, JSON encoding, Python startup/handoff, separate hosted-call, and total-analysis timings. Timings do not include SMS delivery or WorkManager scheduling wait.
+
+Costs include the whole request (instructions, examples, schema and SMS), not just the SMS text. Output usage already includes reasoning; it is not added again. The app requests `service_tier: default` and currently prices only the exact reported `gpt-5.6-luna` model on that reported tier, with rates verified **2026-10-03**. USD per million tokens: ordinary input **0.20**, cached input **0.02**, cache writes **0.25**, output **1.20**. Cache reads/writes are subtracted from total input before ordinary-input pricing. Requests above 272,000 input tokens use the documented full-request long-context premium. Rates/date are preserved with each estimate; update the pricing module when rates change. [Model/pricing documentation](https://developers.openai.com/api/docs/models/gpt-5.6-luna), [cache accounting](https://developers.openai.com/api/docs/guides/prompt-caching), [response usage fields](https://developers.openai.com/api/reference/python/resources/responses/methods/create).
+
+Missing or malformed usage, missing cache breakdown, an unknown model or tier, and network failures show **Unavailable**, not zero. Valid predictions remain valid even when telemetry is absent. Refused/incomplete/malformed model outputs retain usage and costs if the provider supplies them, and failures now retain measured call time. A category failure never erases the expenditure label or first-stage usage.
+
+These are calculated estimates, not provider-reported bills. They exclude account-specific adjustments, taxes and currency conversion. The latest attempt replaces the card's previous analysis; earlier retries, discarded/cancelled calls and messages evicted from the 20-card diagnostic history are not a spending audit. Never assume a timeout or missing usage means the request was free. Use the two dedicated keys and OpenAI's external cost reporting to reconcile totals; the app does not store Admin credentials or fetch billing records.
+
+For a manual check, re-enter both keys and consent, send a synthetic BMTC payment, and inspect two sets of tokens/costs plus the combined amount alongside timings. Send an advertising SMS and expect only classification cost with category skipped. Old cards still load without usage and are not uploaded automatically. Reclassifying them is an explicit new, potentially chargeable attempt.
 
 ## Current folder structure
 
@@ -80,7 +93,7 @@ expense-tracker-with-mcp/
     │   ├── java/com/abijith/expensetracker/
     │   │   ├── MainActivity.kt, ChatScreen.kt, ChatViewModel.kt
     │   │   ├── SmsReceiver.kt, SmsPayload.kt, SmsStore.kt
-    │   │   ├── PythonBridge.kt, SmsPerformance.kt
+    │   │   ├── PythonBridge.kt, SmsPerformance.kt, LlmUsage.kt
     │   │   ├── SmsClassification.kt, SmsClassificationWorker.kt, SmsCategory.kt
     │   │   ├── CloudClassificationSettings.kt, CloudClassificationControls.kt
     │   │   └── ui/theme/
@@ -91,6 +104,7 @@ expense-tracker-with-mcp/
     │   │   ├── category_identifier.py
     │   │   ├── category_examples.py
     │   │   ├── llm_api.py
+    │   │   ├── llm_usage.py
     │   │   └── app_help.py
     │   └── res/
     ├── app/src/androidTest/java/com/abijith/expensetracker/
@@ -101,9 +115,10 @@ expense-tracker-with-mcp/
     │   ├── CategoryInstrumentedTest.kt
     │   ├── ClassificationStoreInstrumentedTest.kt
     │   ├── CloudControlsInstrumentedTest.kt
-    │   └── CloudKeysInstrumentedTest.kt
+    │   ├── CloudKeysInstrumentedTest.kt
+    │   └── LlmUsageInstrumentedTest.kt
     ├── python-tests/
-    │   ├── test_orchestrator.py, test_chat.py, test_classifier.py, test_category.py
+    │   ├── test_orchestrator.py, test_chat.py, test_classifier.py, test_category.py, test_usage.py
     │   ├── benchmark_handoff.py
     │   └── evaluate_classifier.py
     └── Gradle build/settings files, wrapper, and version catalogue
@@ -132,7 +147,7 @@ flowchart TB
         Classifier --> ClassifyTool[expenditure_classifier.classify_expenditure<br/>few-shot prompt and hosted API call]
         ChatPython --> HelpTool[app_help.get_help<br/>local capability information]
         ClassifyTool --> Gate[Android worker<br/>check expenditure and current consent/capture]
-        Gate -->|Other or failure: skip category| Classified[SmsStore updates same message<br/>classification plus suggested category or separate failure]
+        Gate -->|Other or failure: skip category| Classified[SmsStore updates same message<br/>classification, category, usage, calculated cost or safe failure]
         Gate -->|Expenditure and still allowed| CategoryPython[orchestrator.identify_sms_category]
         CategoryPython --> CategoryTool[category_identifier.identify_category<br/>few-shot category prompt and strict enum]
         CategoryTool -->|Result returns through orchestrator and bridge| Classified
@@ -144,10 +159,10 @@ flowchart TB
     CategoryTool <-->|Category identification key| API
 
     subgraph Checks[Verification - run separately]
-        Unit[41 Python unit tests<br/>offline, API mocked]
+        Unit[51 Python unit tests<br/>offline, API mocked; token accounting checked]
         Integration[4 bridge tests and 1 chat screen test<br/>Pixel or emulator]
         Performance[3 performance checks<br/>JSON encoding, warm bridge, and timing format]
-        ClassificationChecks[16 classifier, category, isolated-store, consent UI, and key-routing checks<br/>no valid API key or external requests]
+        ClassificationChecks[21 classifier, category, isolated-store, consent UI, key-routing, and cost checks<br/>no valid API key or external requests]
         Manual[Manual SMS and usability checks]
     end
     Unit -.->|Direct function calls| SMSPython
@@ -178,12 +193,12 @@ Start each check from PowerShell or Android Studio. GitHub Actions is not config
 flowchart TB
     Developer[Developer starts a check]
     Developer --> Shell[PowerShell<br/>activate Python environment and run unittest]
-    Shell --> UnitTests[41 tests check capture, chat, classifier, and categories<br/>synthetic input and mocked HTTP]
+    Shell --> UnitTests[51 tests check capture, chat, classifier, categories, and costs<br/>synthetic input and mocked HTTP]
     UnitTests --> Terminal[Terminal shows pass or fail<br/>and failed assertion details]
 
     Developer --> Studio[Android Studio Run test<br/>or Gradle connectedDebugAndroidTest]
     Studio --> Install[Build and install app plus test APK<br/>on Pixel or emulator]
-    Install --> Runner[AndroidJUnitRunner<br/>24 checks: bridge, UI, performance, classification, and categories]
+    Install --> Runner[AndroidJUnitRunner<br/>29 checks: bridge, UI, performance, classification, categories, and costs]
     Runner --> Results[Android Studio or Gradle shows pass or fail]
 
     Developer --> Benchmark[Optional Python benchmark<br/>100 SMS handoffs after warm-up]

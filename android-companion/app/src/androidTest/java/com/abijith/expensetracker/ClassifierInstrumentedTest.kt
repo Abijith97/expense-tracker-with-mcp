@@ -23,7 +23,7 @@ class ClassifierInstrumentedTest {
         assertEquals("configuration", result.errorCode)
         assertEquals("demo-attempt", result.attemptId)
         assertTrue(result.elapsedMs!! >= 0)
-        assertNull(result.apiElapsedMs)
+        assertTrue(result.apiElapsedMs!! >= 0)
         assertFalse(result.toJson().toString().contains(message.body))
     }
 

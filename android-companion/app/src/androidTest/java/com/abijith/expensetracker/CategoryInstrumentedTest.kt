@@ -26,7 +26,7 @@ class CategoryInstrumentedTest {
         assertEquals(CategoryStatus.FAILED, result.category!!.status)
         assertEquals("configuration", result.category.errorCode)
         assertNull(result.category.name)
-        assertNull(result.category.apiElapsedMs)
+        assertTrue(result.category.apiElapsedMs!! >= 0)
         assertTrue(result.category.elapsedMs!! >= 0)
         assertFalse(result.toJson().toString().contains(message.body))
     }

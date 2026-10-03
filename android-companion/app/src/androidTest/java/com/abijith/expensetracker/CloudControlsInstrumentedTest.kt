@@ -22,6 +22,30 @@ class CloudControlsInstrumentedTest {
     @get:Rule val compose = createComposeRule()
 
     @Test
+    fun costsAndTokensAppearAlongsideTimingsAndUnknownIsNotZero() {
+        val known = LlmUsage(1000, 100, 200, 100, DEFAULT_CLASSIFIER_MODEL,
+            "default", .000289, "2026-10-03")
+        val category = mutableStateOf(SmsCategory(CategoryStatus.IDENTIFIED, "Transport", usage = known))
+        compose.setContent {
+            FinanceTrackerCompanionTheme {
+                Column { SmsClassificationDetails(SmsClassification(ClassificationStatus.EXPENDITURE,
+                    "demo-cost", elapsedMs = 30.0, apiElapsedMs = 12.0, usage = known,
+                    category = category.value), false, {}) }
+            }
+        }
+        compose.onNodeWithText("Classification tokens: input 1000, output 100, cached 200, cache writes 100").assertExists()
+        compose.onNodeWithText("Classification calculated cost: USD 0.00028900").assertExists()
+        compose.onNodeWithText("Category calculated cost: USD 0.00028900").assertExists()
+        compose.onNodeWithText("Calculated cost this attempt: USD 0.00057800").assertExists()
+        compose.onNodeWithText("Total analysis processing: 30.000 ms").assertExists()
+        compose.onNodeWithText("Expenditure API round trip and validation: 12.000 ms").assertExists()
+        compose.runOnIdle { category.value = SmsCategory(CategoryStatus.FAILED, errorCode = "timeout") }
+        compose.onNodeWithText("Category calculated cost: Unavailable").assertExists()
+        compose.onNodeWithText("Calculated cost this attempt: Unavailable (not assumed zero)").assertExists()
+        compose.onNodeWithText("Classification: Expenditure (true)").assertExists()
+    }
+
+    @Test
     fun categorySuggestionUncertaintyAndFailureAppearSeparately() {
         val category = mutableStateOf(SmsCategory(CategoryStatus.IDENTIFIED, "Groceries", 2.5, 1.5))
         compose.setContent {
