@@ -2,13 +2,15 @@
 
 An Android-only POC for learning LLM-powered workflows and orchestration, with MCP reserved for a possible future user chatbot. The application provides the chat interface and captures new SMS on the same phone.
 
-**Available today:** the app has a Chat tab and an SMS capture tab. Chat calls a local help function through embedded Python and displays its reply. SMS capture retains incoming messages until cleared (20 cards per page) and displays Python's acknowledgement plus stage timings. Optional hosted classification calls the Python classifier directly to label messages **Expenditure** or **Other**, with separate inference timings. Expenditures then get a second hosted call to suggest your category/sub-category pair or return **Not sure** for both, displayed on the same card. Cards also show reported token usage and calculated per-attempt USD costs when supported, alongside all existing bottleneck timings. App version: `0.10.0-personal-categories`.
+**Available today:** the app has a Chat tab and an SMS capture tab. Chat calls a local help function through embedded Python and displays its reply. SMS capture retains incoming messages until cleared (20 cards per page) and displays Python's acknowledgement plus stage timings. Optional hosted classification calls the Python classifier directly to label messages **Expenditure** or **Other**, with separate inference timings. Expenditures then get a second hosted call to suggest your category/sub-category pair or return **Not sure** for both, displayed on the same card. Cards also show reported token usage and calculated per-attempt USD costs when supported, alongside all existing bottleneck timings. The debug build includes **Simulate SMS** for testing without another phone. App version: `0.11.0-sms-simulator`.
 
 **Still planned:** transaction-detail extraction, expense storage, category confirmation/correction, and LLM chat answers. Every current chat message returns capability information; it does not yet interpret questions or record expenses.
 
 Capture and built-in chat help work offline. Hosted classification needs internet, two dedicated API keys, and explicit upload consent. It needs no WhatsApp account, Twilio, ngrok, public webhook, or laptop service. Open the [Android project and setup guide](android-companion/README.md) to build, install, and run it.
 
 For test locations, coverage, Windows commands, benchmarks, and manual checks, see the [Markdown testing wiki](docs/wiki/Testing.md).
+
+For quick test commands, see the [test README](android-companion/python-tests/README.md). The SMS-simulator milestone is tagged `v0.11.0`.
 
 ## Progress — October 3, 2026
 
@@ -96,6 +98,14 @@ These are calculated estimates, not provider-reported bills. They exclude accoun
 
 For a manual check, re-enter both keys and consent, send a synthetic BMTC payment, and inspect two sets of tokens/costs plus the combined amount alongside timings. Send an advertising SMS and expect only classification cost with category skipped. Old cards still load without usage and are not uploaded automatically. Reclassifying them is an explicit new, potentially chargeable attempt.
 
+## Test without another phone
+
+In a debug build, select **SMS capture → Simulate SMS (debug only)** after enabling capture and granting SMS permission. Paste synthetic text or load a built-in example, then select **Add test message**. With cloud off, this saves a local test card and calls embedded Python only. With cloud on, confirm potential API charges before the normal classification/category worker is scheduled. Cards retain the **SIMULATED SMS - test only** label across restarts.
+
+Simulation shares `SmsProcessor` with real reception: save → JSON/Python handoff → optional WorkManager → classification → expenditure-only category suggestion → same card's costs/timings. It does not send an SMS, write the phone's inbox, test Android reception/background delivery, or measure receiver/delivery time. The full simulator is in the debug source set; release uses an empty UI and a rejecting stub. See the [step-by-step simulator guide](android-companion/README.md#simulate-sms-without-another-phone).
+
+Verified October 4: **54 offline Python tests and 53 Android checks passed**, plus debug app/test APK builds, unsigned release build, and lint. The updated debug APK is installed on the Pixel 7a without clearing history or remembered keys. Automated checks use synthetic inputs, isolated storage, and stubbed cloud calls/scheduling; they do not establish live model accuracy or SMS delivery.
+
 ## Current folder structure
 
 Generated builds, local SDK settings, virtual environments, and private phone data are omitted.
@@ -111,7 +121,7 @@ expense-tracker-with-mcp/
     │   ├── AndroidManifest.xml
     │   ├── java/com/abijith/expensetracker/
     │   │   ├── MainActivity.kt, ChatScreen.kt, ChatViewModel.kt
-    │   │   ├── SmsReceiver.kt, SmsPayload.kt, SmsStore.kt
+    │   │   ├── SmsReceiver.kt, SmsProcessor.kt, SmsPayload.kt, SmsStore.kt
     │   │   ├── PythonBridge.kt, SmsPerformance.kt, LlmUsage.kt
     │   │   ├── SmsClassification.kt, SmsClassificationWorker.kt, SmsCategory.kt
     │   │   ├── CloudClassificationSettings.kt, CloudClassificationControls.kt
@@ -127,6 +137,8 @@ expense-tracker-with-mcp/
     │   │   ├── llm_usage.py
     │   │   └── app_help.py
     │   └── res/
+    ├── app/src/debug/java/com/abijith/expensetracker/SmsSimulationControls.kt
+    ├── app/src/release/java/com/abijith/expensetracker/SmsSimulationControls.kt
     ├── app/src/androidTest/java/com/abijith/expensetracker/
     │   ├── PythonBridgeInstrumentedTest.kt
     │   ├── ChatScreenInstrumentedTest.kt
@@ -138,8 +150,11 @@ expense-tracker-with-mcp/
     │   ├── CloudKeysInstrumentedTest.kt
     │   ├── CloudPersistenceInstrumentedTest.kt
     │   ├── SmsHistoryInstrumentedTest.kt
+    │   ├── SmsProcessorInstrumentedTest.kt
+    │   ├── SmsSimulationInstrumentedTest.kt
     │   └── LlmUsageInstrumentedTest.kt
     ├── python-tests/
+    │   ├── README.md
     │   ├── test_orchestrator.py, test_chat.py, test_classifier.py, test_category.py, test_usage.py
     │   ├── benchmark_handoff.py
     │   └── evaluate_classifier.py
@@ -157,7 +172,9 @@ flowchart TB
     subgraph Phone[Current application on the Android phone]
         Chat[Chat tab] --> ChatWork[ChatViewModel<br/>background executor]
         SMS[New incoming SMS] --> Capture[SmsReceiver<br/>permission and capture checks]
-        Capture --> Save[SmsStore<br/>save new message as Pending]
+        Capture --> Process[SmsProcessor<br/>shared permission/capture-guarded local path]
+        Simulate[Debug-only Simulate SMS<br/>editable synthetic text; confirm cloud charges] --> Process
+        Process --> Save[SmsStore<br/>save new message as Pending; retain simulated label]
         Save -->|If capture remains active| Bridge[PythonBridge<br/>shared embedded Python runtime]
         ChatWork --> Bridge
         Bridge -->|SMS payload| SMSPython[orchestrator.handle_sms<br/>validate and return receipt]
@@ -185,12 +202,15 @@ flowchart TB
         Integration[4 bridge tests and 1 chat screen test<br/>Pixel or emulator]
         Performance[3 performance checks<br/>JSON encoding, warm bridge, and timing format]
         ClassificationChecks[34 classifier, category, history, consent UI, key-routing, cost, and encrypted-recovery checks<br/>no valid API key or external requests]
+        SimulationChecks[11 shared-processor and simulator UI checks<br/>isolated history and stubbed cloud scheduling]
         Manual[Manual SMS and usability checks]
     end
     Unit -.->|Direct function calls| SMSPython
     Unit -.->|Direct function calls| ChatPython
     Integration -.->|Call packaged Python| Bridge
     Integration -.->|Enter text, send, and switch tabs| Chat
+    SimulationChecks -.->|Real packaged handoff, lifecycle guards| Process
+    SimulationChecks -.->|Validation and charge-confirmation UI| Simulate
     Performance -.->|Synthetic message measurements| Bridge
     Unit -.->|Mock HTTP and validate parsing| ClassifyTool
     Unit -.->|Strict category parsing and safe failures| CategoryTool
@@ -220,7 +240,7 @@ flowchart TB
 
     Developer --> Studio[Android Studio Run test<br/>or Gradle connectedDebugAndroidTest]
     Studio --> Install[Build and install app plus test APK<br/>on Pixel or emulator]
-    Install --> Runner[AndroidJUnitRunner<br/>42 checks: bridge, UI, performance, classification, categories, costs, and encrypted recovery]
+    Install --> Runner[AndroidJUnitRunner<br/>53 checks: bridge, UI, simulator/shared processor, performance, classification, categories, costs, and encrypted recovery]
     Runner --> Results[Android Studio or Gradle shows pass or fail]
 
     Developer --> Benchmark[Optional Python benchmark<br/>100 SMS handoffs after warm-up]

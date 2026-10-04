@@ -19,7 +19,8 @@ class SmsHistoryInstrumentedTest {
 
     @Test
     fun olderCardsAreAccessibleWithoutDeletingHistoryOrUploading() {
-        val messages = (0 until 26).map { CapturedSms("demo-page-$it", "DEMO", "DEMO body $it", 0, 1) }
+        val messages = (0 until 26).map { CapturedSms("demo-page-$it", "DEMO", "DEMO body $it", 0, 1,
+            simulated = it == 0) }
         compose.setContent {
             FinanceTrackerCompanionTheme {
                 SmsDebugScreen(SmsCaptureState(messages = messages), CloudClassificationState(), false,
@@ -28,6 +29,8 @@ class SmsHistoryInstrumentedTest {
             }
         }
         compose.onNodeWithText("Captured messages: 26 (no 20-message storage cap)").assertExists()
+        compose.onNodeWithTag("sms_history").performScrollToNode(hasText("SIMULATED SMS - test only"))
+        compose.onNodeWithText("SIMULATED SMS - test only").assertExists()
         compose.onNodeWithTag("sms_history").performScrollToNode(hasText("Show older messages (6 remaining)"))
         compose.onNodeWithText("Show older messages (6 remaining)").performClick()
         compose.onNodeWithTag("sms_history").performScrollToNode(hasText("DEMO body 25"))

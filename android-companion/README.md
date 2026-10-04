@@ -1,6 +1,6 @@
 # Android app — category identification and separate API keys
 
-The Android application provides its own Chat tab alongside SMS capture diagnostics, stage timings, and optional hosted expenditure classification. The Python orchestrator and classifier run inside the APK. App version: `0.10.0-personal-categories` (`versionCode` 12).
+The Android application provides its own Chat tab alongside SMS capture diagnostics, stage timings, and optional hosted expenditure classification. The Python orchestrator and classifier run inside the APK. App version: `0.11.0-sms-simulator` (`versionCode` 13). Debug builds also provide **Simulate SMS** to test without another phone.
 
 Chat currently calls the local `app_help.get_help` function for every message, including what the app can do and which finance features are planned. Chat does not yet perform LLM inference, record expenses, or answer spending questions. SMS classification calls `expenditure_classifier.classify_expenditure` directly, which can call OpenAI after you enter two dedicated keys and consent. The app runs without a WhatsApp account, Twilio, ngrok, or a separately hosted application backend.
 
@@ -23,7 +23,7 @@ Chat keeps the latest 60 entries in memory, survives rotation and tab changes, a
 ## What happens for one SMS
 
 1. Android delivers a new SMS to `SmsReceiver`.
-2. Its background executor combines the SMS parts and saves one local message with `Python: Pending`.
+2. Its background executor combines the SMS parts and calls shared `SmsProcessor`, which saves one local message with `Python: Pending`.
 3. `PythonBridge` encodes the Python request as JSON, starts the embedded runtime if needed, and calls `orchestrator.handle_sms(...)`.
 4. Python validates the fields and returns a JSON receipt.
 5. Kotlin checks the receipt and updates the **same saved message** to `Python: Acknowledged`.
@@ -85,6 +85,20 @@ app/build/outputs/apk/debug/app-debug.apk
 ```
 
 This is a debug APK for your personal development phone. If you transfer and install the APK manually, Android may ask you to allow installation from the app opening that file. Installation does not grant SMS access: open the companion and grant that permission through Android's normal permission dialog.
+
+## Simulate SMS without another phone
+
+1. Install the **debug** APK. In **SMS capture**, enable capture and grant SMS permission. The simulator deliberately keeps the existing permission/capture lifecycle checks; it is not a way to bypass them.
+2. Tap **Simulate SMS (debug only)**, above the cloud controls.
+3. Leave the sender as `DEMO` or edit it. Paste synthetic text in **Sample SMS body**, or choose **Load expenditure example** / **Load other example**. Sender must be nonblank and at most 100 characters; body must be nonblank and at most 12,000 UTF-16 characters. Identical submissions get distinct test IDs.
+4. With cloud **off**, tap **Add test message** for a saved card and local Python acknowledgement only; no cloud job is scheduled by this submission. With cloud **on**, tap it and confirm **Submit with cloud**. This uses your configured keys/model and can incur charges (one classification call, plus a category call for expenditures). Cancel sends nothing and adds no card. Submission is blocked while cloud settings restore.
+5. Close the dialog and inspect the new card below the cloud controls. It says **SIMULATED SMS - test only**, retained after restart. Expected sample labels: Blinkit payment → Expenditure, utilities/groceries; cashback advertisement → Other, category skipped. These are expectations, not guaranteed live-model results.
+
+The shared path is `SmsProcessor → SmsStore → PythonBridge.acknowledge → optional SmsClassificationWorker → existing Python classification/category helpers`. The simulator does not call a separate fake classifier, send an SMS, broadcast `SMS_RECEIVED`, or change the phone's inbox. Pausing/clearing cancels or invalidates work as usual. Cloud consent still applies; requests already sent cannot be unsent. Reclassifying any card is a separate potentially chargeable attempt.
+
+JSON conversion, Python startup/handoff, hosted inference, tokens and calculated costs still appear. **Simulation does not measure SMS detection, receiver setup/queueing, delivery delay, or app-entry-to-handoff time**; those fields are absent, not zero. Use occasional real SMS checks to verify reception and closed-app delivery. The simulator exists only in `app/src/debug`; `app/src/release` supplies an empty UI/rejecting stub, with no simulator implementation or extra exported component.
+
+Test text drafts are kept in memory, not Android saved-instance state, and cleared on close/success. Saved test cards follow the same retention/clear controls as captures and do not enter a finance ledger. The only new stored metadata is an optional local `simulated` flag; older cards default to real-capture display. This flag is not sent to the LLM.
 
 ## Use it
 
@@ -224,7 +238,7 @@ Compare predictions with your intended labels; passing offline tests does not es
 
 The [Markdown testing wiki](../docs/wiki/Testing.md) provides a detailed suite-by-suite guide, commands, timing boundaries, coverage limits, and troubleshooting.
 
-There are 54 Python unit tests on Windows and 42 Android checks: four bridge, one chat screen, three performance, three classifier-contract, six category-contract/routing, four isolated-store, seven consent/category/cost UI, three key settings/routing, four usage, six encrypted credential-recovery, and one history-pagination check. All input messages are synthetic. Offline tests mock API responses or use a missing key; they make no real API requests and prove no model accuracy. Tests do not read your inbox, send SMS, or clear the app's saved capture history. Storage tests use a separate synthetic cache directory, and consent tests use stub callbacks.
+There are 54 Python unit tests on Windows and 53 Android checks: four bridge, one chat screen, three performance, three classifier-contract, six category-contract/routing, four isolated-store, seven consent/category/cost UI, three key settings/routing, four usage, six encrypted credential-recovery, one history-pagination, seven shared-processor, and four simulator-UI checks. All input messages are synthetic. Offline tests mock API responses or use a missing key; they make no real API requests and prove no model accuracy. Tests do not read your inbox, send SMS, or clear the app's saved capture history. Storage/processor tests use a separate synthetic cache directory, and consent/simulator UI tests use stub callbacks. The local-only simulator-entry test uses a wrapper-scoped permission without changing real app permissions.
 
 ### Python unit tests on Windows
 
@@ -270,7 +284,7 @@ This reports median and 95th-percentile processing time for 100 calls after warm
 
 The UI tests use Espresso `3.7.0`, AndroidX JUnit `1.3.0`, and the test runner `1.7.0`. The template's Espresso `3.5.1` failed on Android 17 while reflecting on `InputManager.getInstance`; [Espresso 3.7.0's release notes](https://developer.android.com/jetpack/androidx/releases/test#espresso-3.7.0) document the change to use `getSystemService` instead.
 
-1. Open one of the eleven test classes under `app/src/androidTest/java/com/abijith/expensetracker/` in Android Studio: `PythonBridgeInstrumentedTest`, `ChatScreenInstrumentedTest`, `SmsPerformanceInstrumentedTest`, `ClassifierInstrumentedTest`, `CategoryInstrumentedTest`, `ClassificationStoreInstrumentedTest`, `CloudControlsInstrumentedTest`, `CloudKeysInstrumentedTest`, `LlmUsageInstrumentedTest`, `CloudPersistenceInstrumentedTest`, or `SmsHistoryInstrumentedTest`.
+1. Open one of the thirteen test classes under `app/src/androidTest/java/com/abijith/expensetracker/` in Android Studio: `PythonBridgeInstrumentedTest`, `ChatScreenInstrumentedTest`, `SmsPerformanceInstrumentedTest`, `ClassifierInstrumentedTest`, `CategoryInstrumentedTest`, `ClassificationStoreInstrumentedTest`, `CloudControlsInstrumentedTest`, `CloudKeysInstrumentedTest`, `LlmUsageInstrumentedTest`, `CloudPersistenceInstrumentedTest`, `SmsHistoryInstrumentedTest`, `SmsProcessorInstrumentedTest`, or `SmsSimulationInstrumentedTest`.
 2. Connect your Pixel or start a supported emulator.
 3. Click the green run arrow beside the test class and choose **Run**. Android Studio installs the app and a separate test APK, then shows the results.
 
@@ -286,11 +300,13 @@ Background/history update verification on October 3: **51 Python tests and 39 An
 
 Personal category update verification: **54 Python tests and 42 Android checks passed**, plus debug app/test builds and lint. Version `0.10.0-personal-categories` was installed without clearing captures or remembered credentials. All model replies in automated tests were mocked; live predictions still require the synthetic checks above.
 
-To run all eleven application test classes from PowerShell, from `android-companion`:
+Simulator update verification on October 4: **54 Python tests and 53 Android checks passed**, plus debug app/test and unsigned release builds and lint. Version `0.11.0-sms-simulator` was installed on the Pixel without clearing captures or remembered credentials. No SMS or paid API calls were sent by the tests. Shared local submission works; actual cloud predictions remain a manual opt-in check.
+
+To run all thirteen application test classes from PowerShell, from `android-companion`:
 
 ```powershell
 $env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'
-.\gradlew.bat :app:connectedDebugAndroidTest '-Pandroid.testInstrumentationRunnerArguments.class=com.abijith.expensetracker.PythonBridgeInstrumentedTest,com.abijith.expensetracker.ChatScreenInstrumentedTest,com.abijith.expensetracker.SmsPerformanceInstrumentedTest,com.abijith.expensetracker.ClassifierInstrumentedTest,com.abijith.expensetracker.CategoryInstrumentedTest,com.abijith.expensetracker.ClassificationStoreInstrumentedTest,com.abijith.expensetracker.CloudControlsInstrumentedTest,com.abijith.expensetracker.CloudKeysInstrumentedTest,com.abijith.expensetracker.LlmUsageInstrumentedTest,com.abijith.expensetracker.CloudPersistenceInstrumentedTest,com.abijith.expensetracker.SmsHistoryInstrumentedTest'
+.\gradlew.bat :app:connectedDebugAndroidTest
 ```
 
 Use a development device/emulator: Android test tooling installs development APKs and may restart the app. These tests cover the bridges, basic chat/consent controls, and isolated classification-store recovery. Actual SMS delivery, permission dialogs, end-to-end WorkManager scheduling, cloud inference, capture controls, and usability still need manual checks. Android Studio's generated sample tests have been removed; only tests of the actual implementation remain. GitHub Actions is not configured yet; these suites run locally.
@@ -343,7 +359,7 @@ The first bridge call in that separate timing-build performance-suite run actual
 
 Use synthetic messages that contain no personal details or verification codes.
 
-1. Install the updated APK using Android Studio **Run**. Send a message in **Chat**, check the local help reply, then select **SMS capture** and check that it says `Milestone 7: category identification`. Leave cloud off for the capture-only checks.
+1. Install the updated APK using Android Studio **Run**. Send a message in **Chat**, check the local help reply, then select **SMS capture** and check that it says `Milestone 9: personal categories and sub-categories`. Leave cloud off for the capture-only checks.
 2. Enable capture and grant SMS permission if needed.
 3. Send `Demo purchase: Rs 120 at Cafe Example.` as an ordinary SMS from another phone.
 4. Check that one message card shows `Python: Acknowledged`, a handoff time, and a receipt with `received: true` and `python_version` starting with `3.11`. `Pending` may disappear too quickly to observe.
@@ -395,7 +411,8 @@ These files are under `app/src/main/java/com/abijith/expensetracker/`:
 | `MainActivity.kt` | Chat/SMS tab navigation, capture controls, permission request/status, and SMS receipt/timing display. |
 | `ChatScreen.kt` | Chat message list, input, Send button, and reply/timing display. |
 | `ChatViewModel.kt` | Session conversation state, background chat processing, and rotation-safe state. |
-| `SmsReceiver.kt` | Receives/combines SMS parts, saves the message, performs a short local handoff, and enqueues cloud work only when enabled. |
+| `SmsReceiver.kt` | Receives/combines SMS parts, records reception timing, and calls the shared processor on its executor. |
+| `SmsProcessor.kt` | Shared off-main-thread save/handoff/scheduling path for real SMS and debug simulation; guards permission and pause/clear tokens. |
 | `PythonBridge.kt` | Starts embedded Python, calls capture/chat/classification entry points, validates safe results, and keeps HTTP outside the shared capture/chat monitor. |
 | `SmsPayload.kt` | Builds and serializes the SMS request sent to Python; used by the production bridge and JSON benchmark. |
 | `SmsPerformance.kt` | Monotonic timing helpers and the persisted stage-timing format. |

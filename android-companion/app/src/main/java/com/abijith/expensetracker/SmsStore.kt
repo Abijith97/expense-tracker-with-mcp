@@ -20,6 +20,7 @@ data class CapturedSms(
     val receivedAtMillis: Long,
     val pythonHandoff: PythonHandoff? = null,
     val classification: SmsClassification? = null,
+    val simulated: Boolean = false,
 )
 
 data class SmsCaptureState(
@@ -170,6 +171,7 @@ class SmsStore internal constructor(context: Context) {
                         body = item.getString("body"),
                         sentAtMillis = item.getLong("sentAtMillis"),
                         receivedAtMillis = item.getLong("receivedAtMillis"),
+                        simulated = item.optBoolean("simulated", false),
                         classification = item.optJSONObject("classification")?.let(SmsClassification::fromJson),
                         pythonHandoff = item.optJSONObject("python_handoff")?.let { handoff ->
                             val status = HandoffStatus.valueOf(handoff.getString("status"))
@@ -210,6 +212,7 @@ class SmsStore internal constructor(context: Context) {
                         .put("body", message.body)
                         .put("sentAtMillis", message.sentAtMillis)
                         .put("receivedAtMillis", message.receivedAtMillis)
+                        .put("simulated", message.simulated)
                 message.classification?.let { item.put("classification", it.toJson()) }
                 message.pythonHandoff?.let { handoff ->
                     val result = JSONObject().put("status", handoff.status.name)

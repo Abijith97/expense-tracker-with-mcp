@@ -50,34 +50,16 @@ class SmsReceiver : BroadcastReceiver() {
                     pythonHandoff = PythonHandoff(HandoffStatus.PENDING),
                 )
                 val preparationFinishedAt = SystemClock.elapsedRealtimeNanos()
-                // Persist the SMS first so a Python error cannot lose the capture.
-                val saveStartedAt = SystemClock.elapsedRealtimeNanos()
-                val stored = store.append(message, generation)
-                val initialSaveMs = elapsedMs(saveStartedAt)
-                if (stored && store.canHandOff(id, generation)) {
-                    if (hasSmsPermission(context)) {
-                        val reception = SmsReceptionTiming(
-                            enteredAtNanos = enteredAtNanos,
-                            receiverSetupMs = elapsedMs(enteredAtNanos, queuedAtNanos),
-                            executorWaitMs = elapsedMs(queuedAtNanos, workerStartedAt),
-                            messagePreparationMs = elapsedMs(workerStartedAt, preparationFinishedAt),
-                            initialSaveMs = initialSaveMs,
-                            // Includes delivery/scheduling and cross-clock error.
-                            smsTimestampToReceiverMs = receivedAt - sentAt,
-                        )
-                        val result = PythonBridge.acknowledge(context, message, reception)
-                        val applied = store.completeHandoff(id, generation, result)
-                        Log.i(TAG, "Python handoff: status=${result.status}, elapsedMs=${result.elapsedMillis}, applied=$applied")
-                        result.performance?.let {
-                            Log.i("SmsPerformance", "sms_id=$id timings=${it.toJson()}")
-                        }
-                        // Enqueue a separate job only after the short local handoff.
-                        // Cloud calls must never extend the broadcast execution window.
-                        if (applied) SmsClassificationWorker.enqueue(context, id, generation)
-                    } else {
-                        store.setEnabled(false)
-                    }
-                }
+                val reception = SmsReceptionTiming(
+                    enteredAtNanos = enteredAtNanos,
+                    receiverSetupMs = elapsedMs(enteredAtNanos, queuedAtNanos),
+                    executorWaitMs = elapsedMs(queuedAtNanos, workerStartedAt),
+                    messagePreparationMs = elapsedMs(workerStartedAt, preparationFinishedAt),
+                    initialSaveMs = 0.0, // Measured by the shared processor around persistence.
+                    // Includes delivery/scheduling and cross-clock error.
+                    smsTimestampToReceiverMs = receivedAt - sentAt,
+                )
+                val stored = SmsProcessor.forContext(context, store).process(message, generation, reception)
                 Log.i(TAG, "SMS event handled: stored=$stored, elapsedMs=${elapsedMs(enteredAtNanos)}")
             } catch (_: Exception) {
                 // Neither sender nor body (including exception text) belongs in logcat.

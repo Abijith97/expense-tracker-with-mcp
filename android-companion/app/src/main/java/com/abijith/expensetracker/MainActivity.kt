@@ -125,6 +125,11 @@ class MainActivity : ComponentActivity() {
                             onClassify = { id -> store.activeGeneration()?.let {
                                 SmsClassificationWorker.enqueue(this@MainActivity, id, it)
                             } },
+                            onSimulate = { sender, body, allowCloud ->
+                                withContext(Dispatchers.IO) {
+                                    submitSimulatedSms(this@MainActivity, store, sender, body, allowCloud)
+                                }
+                            },
                         )
                     }
                 }
@@ -213,6 +218,7 @@ internal fun SmsDebugScreen(
     onEnableCloud: suspend (String, String, String, Boolean, Boolean) -> Boolean,
     onDisableCloud: suspend () -> Unit,
     onClassify: (String) -> Unit,
+    onSimulate: suspend (String, String, Boolean) -> Boolean = { _, _, _ -> false },
 ) {
     val capturing = permissionGranted && state.enabled
     var visibleCount by rememberSaveable { mutableStateOf(SmsStore.PAGE_SIZE) }
@@ -268,6 +274,8 @@ internal fun SmsDebugScreen(
                     "Backgrounding is supported; Force Stop prevents receipt until you reopen the app.",
                     style = MaterialTheme.typography.bodySmall)
             }
+            item { SmsSimulationControls(capturing && state.error == null,
+                cloudState.enabled, cloudState.loading, onSimulate) }
             item { CloudClassificationControls(cloudState, onEnableCloud, onDisableCloud) }
             if (state.messages.isEmpty()) {
                 item { Text("No captured messages yet. Enable capture, then send an ordinary SMS to this phone.") }
@@ -275,8 +283,13 @@ internal fun SmsDebugScreen(
             items(state.messages.take(visibleCount), key = { it.id }) { message ->
                 OutlinedCard(modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (message.simulated) {
+                            Text("SIMULATED SMS - test only", style = MaterialTheme.typography.titleSmall)
+                            Text("No SMS was sent or received. Receiver/delivery timings are not measured.",
+                                style = MaterialTheme.typography.bodySmall)
+                        }
                         Text("From: ${message.sender}", style = MaterialTheme.typography.titleMedium)
-                        Text("SMS timestamp: ${formatTimestamp(message.sentAtMillis)}", style = MaterialTheme.typography.bodySmall)
+                        Text("${if (message.simulated) "Test created" else "SMS timestamp"}: ${formatTimestamp(message.sentAtMillis)}", style = MaterialTheme.typography.bodySmall)
                         Text("Captured locally: ${formatTimestamp(message.receivedAtMillis)}", style = MaterialTheme.typography.bodySmall)
                         Text(message.body)
                         SmsClassificationDetails(message.classification,

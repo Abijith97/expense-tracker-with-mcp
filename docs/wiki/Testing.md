@@ -6,25 +6,29 @@ This is repository-hosted Markdown wiki documentation under `docs/wiki/`, not a 
 
 ## Scope and current verification
 
-Last verified: **October 3, 2026**. The current build is `0.10.0-personal-categories`. Python tests, debug APK builds, and lint were verified on Windows with Python 3.11.9. All eleven Android test classes passed on the Pixel 7a running Android 17 through AndroidJUnitRunner after installing the app/test APKs without clearing storage.
+Last verified: **October 4, 2026**. The current build is `0.11.0-sms-simulator`. Python tests, debug/release APK builds, and lint were verified on Windows with Python 3.11.9. All thirteen Android test classes passed on the Pixel 7a running Android 17 through AndroidJUnitRunner after installing the debug app/test APKs without clearing storage. The release variant contains only an empty simulator UI and rejecting stub, not the debug simulator implementation.
 
 | Check | Last verified result | What it establishes |
 | --- | --- | --- |
 | Python unit suite | 54 tests passed | Python input/output contracts, strict boolean/category parsing, safe token/cost telemetry, shared transport safety, and mocked inference. |
-| Android integration/UI suite | 42 tests passed | Packaged Python, routing, consent/cost UI, usage totals, isolated encrypted recovery, retained/paged history, and timing contracts work on the phone. This does not verify live SMS delivery or hosted predictions. |
-| Debug application and test APK builds | Passed | The Android source, resources, dependencies, and embedded Python package build together. |
+| Android integration/UI suite | 53 tests passed | Packaged Python, routing, consent/cost UI, usage totals, isolated encrypted recovery, retained/paged history, shared processing, simulator input/charge confirmation, and timing contracts work on the phone. This does not verify live SMS delivery or hosted predictions. |
+| Debug application/test and unsigned release APK builds | Passed | Both source-set variants build with embedded Python; the simulator implementation is debug-only. |
 | Android lint | Passed | No lint errors and no remaining unused-resource warnings. Other warnings remain; this is not a claim of zero warnings. |
 | Live category suggestions | Needs a manual synthetic SMS check | Automated checks do not contact OpenAI with a valid key or establish category accuracy. |
 
-**Source version:** this guide accompanies the `0.10.0-personal-categories` update with 54 Python and 42 Android checks. Commit `79704f8` contains the prior two-key/category build with 41/24 checks. Commit `c55c370` contains the prior direct-classification build with 27/14 checks. The older MCP experiment in `22b14ee` had 43/16 checks; its MCP-only files were intentionally removed. Use the matching source version when comparing test totals.
+**Source version:** this guide accompanies `0.11.0-sms-simulator` with 54 Python and 53 Android checks. Commit `9e52fb4` contains the prior personal-category/background build with 54/42 checks. Commit `79704f8` contains the prior two-key/category build with 41/24 checks. Commit `c55c370` contains the prior direct-classification build with 27/14 checks. The older MCP experiment in `22b14ee` had 43/16 checks; its MCP-only files were intentionally removed. Use the matching source version when comparing test totals.
 
 There is no configured GitHub Actions workflow. A Git push does not currently execute these tests. Android Studio and Gradle are test runners; GitHub Actions could automate selected checks later.
+
+The `v0.11.0` tag identifies this SMS-simulator milestone (`versionCode` 13, app version `0.11.0-sms-simulator`). A short [test README](../../android-companion/python-tests/README.md) provides the quick-start commands; this guide remains the detailed coverage reference. A Git tag is a source checkpoint, not an APK distribution or a GitHub Release.
 
 ## What gets tested in the normal flow
 
 For an SMS, Android captures and saves the message, calls embedded Python for a short acknowledgement, and optionally schedules a separate cloud-classification worker. That worker calls `orchestrator.classify_sms` for the boolean check. The bridge supplies a dedicated classification key. Only an Expenditure result with current permission/capture/consent enters `orchestrator.identify_sms_category` for the second hosted call, using its own category key. Kotlin validates each result and updates the same captured-message card. A category failure must preserve the expenditure label.
 
 For chat, Kotlin calls the Python orchestrator, which calls `app_help.get_help()` directly. Every valid chat message currently receives capability information; spending queries are not implemented yet.
+
+The debug **Simulate SMS** dialog enters the same shared `SmsProcessor` after reception/part decoding. It creates a labelled local card, calls the packaged Python acknowledgement, and optionally schedules the same cloud worker after charge confirmation. A cloud-off submission explicitly forbids cloud scheduling even if settings change while the local handoff runs. Permission/capture checks still apply. Simulator tests use isolated storage, a wrapper-scoped synthetic permission (not a grant to the real app), and stubbed scheduling/confirmation callbacks. They never send SMS, write the phone inbox, access real credentials, or contact OpenAI with a valid key. Simulation cannot verify Android reception, closed-app delivery, or receiver/delivery timings.
 
 The tests enter these stages independently:
 
@@ -39,6 +43,7 @@ The tests enter these stages independently:
 | Classification persistence | Isolated history survives 26 messages and retains older Waiting work; stale results remain blocked after pause/clear. |
 | Credential restart recovery | Isolated vaults use real Android Keystore and synthetic keys to recover remembered consent/session, forget keys, or fail closed after corruption; no real credentials are accessed. |
 | Performance measurements | Separate benchmarks measure JSON serialization and local handoff stages. |
+| Shared processor and simulator | Real local Python handoff for both sources; isolated persistence/provenance, stale/permission/pause/clear guards, cloud-off entry point, editable samples, input bounds, and cancelled/confirmed charge prompts. |
 | Actual SMS delivery and hosted predictions | Manual checks and the explicitly invoked paid evaluation. |
 
 ## Python unit tests: 54 checks
@@ -94,7 +99,7 @@ To run just category tests:
 python -m unittest discover -s python-tests -p "test_category.py" -v
 ```
 
-## Android integration and UI tests: 42 checks
+## Android integration and UI tests: 53 checks
 
 Files are under `android-companion/app/src/androidTest/java/com/abijith/expensetracker/`. The tests run in a separate test APK on a development phone or emulator, using AndroidJUnitRunner and Compose UI testing.
 
@@ -111,6 +116,8 @@ Files are under `android-companion/app/src/androidTest/java/com/abijith/expenset
 | `CloudPersistenceInstrumentedTest.kt` | 6 | Real Keystore encryption with isolated files/aliases: no plaintext keys, remembered consent/model/session recovery, memory-only mode, key rotation/forget, corrupt ciphertext and missing-key fail-closed recovery, and explicit consent. |
 | `SmsHistoryInstrumentedTest.kt` | 1 | Stubbed SMS screen state with 26 cards: Show older messages exposes older captures without uploading or touching real history. |
 | `CategoryInstrumentedTest.kt` | 6 | Python/Kotlin pair hierarchies match, both labels parse, invalid/missing pairs are rejected in the bridge, failed categories preserve Expenditure, routing remains gated, and legacy/current result formats persist. |
+| `SmsProcessorInstrumentedTest.kt` | 7 | Shared processor and actual cloud-off simulator entry point; real packaged local Python, isolated saved source labels, no fabricated reception timings, rejected permissions/duplicates/stale tokens, pause/clear guards, safe handoff failure, input limits, and distinct IDs for identical tests. Scheduling is stubbed or forbidden, never real cloud work. |
+| `SmsSimulationInstrumentedTest.kt` | 4 | Compose simulator UI: paused/blank/overlong/restoring submissions blocked, editable Unicode input, cloud-off callback, cloud charge confirmation/cancel, and synthetic sample buttons. All submit callbacks are stubbed. |
 
 The storage tests override the store location with a unique synthetic cache directory. They clean only their own test files. The UI consent test does not enable real cloud uploads. Tests do not read the SMS inbox, send SMS, inject SMS broadcasts, or clear the user's saved capture history.
 
@@ -118,22 +125,22 @@ The storage tests override the store location with a unique synthetic cache dire
 
 1. Open `android-companion` in Android Studio and let Gradle sync finish.
 2. Connect a development Pixel or start a compatible emulator.
-3. Open one of the eleven test classes above.
+3. Open one of the thirteen test classes above.
 4. Click the green run arrow beside the class and choose **Run**.
 5. Inspect the test results and any failed assertion.
 
 The tooling builds/installs the app and test APK and may restart the application. Memory-only mode needs key/consent re-entry; opted-in remembered settings restore automatically. Key tests now use isolated settings instances, ciphertext files, and unique Keystore aliases, so they never disable or remove your real remembered credentials. Updating with the same debug signing key does not require uninstalling or clearing storage.
 
-### Run all eleven classes from PowerShell
+### Run all thirteen classes from PowerShell
 
 From `android-companion`, with Android Studio's JDK installed:
 
 ```powershell
 $env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'
-.\gradlew.bat :app:connectedDebugAndroidTest '-Pandroid.testInstrumentationRunnerArguments.class=com.abijith.expensetracker.PythonBridgeInstrumentedTest,com.abijith.expensetracker.ChatScreenInstrumentedTest,com.abijith.expensetracker.SmsPerformanceInstrumentedTest,com.abijith.expensetracker.ClassifierInstrumentedTest,com.abijith.expensetracker.CategoryInstrumentedTest,com.abijith.expensetracker.ClassificationStoreInstrumentedTest,com.abijith.expensetracker.CloudControlsInstrumentedTest,com.abijith.expensetracker.CloudKeysInstrumentedTest,com.abijith.expensetracker.LlmUsageInstrumentedTest,com.abijith.expensetracker.CloudPersistenceInstrumentedTest,com.abijith.expensetracker.SmsHistoryInstrumentedTest'
+.\gradlew.bat :app:connectedDebugAndroidTest
 ```
 
-Gradle reports failures and writes connected-test reports under `app/build/reports/androidTests/connected/`. If running through ADB directly, inspect the test-runner result (`OK (42 tests)`), not just the shell exit code.
+Gradle reports failures and writes connected-test reports under `app/build/reports/androidTests/connected/`. If running through ADB directly, inspect the test-runner result (`OK (53 tests)`), not just the shell exit code.
 
 Generated `ExampleUnitTest` and `ExampleInstrumentedTest` were removed; they were template examples, not meaningful application coverage.
 
@@ -233,7 +240,7 @@ Transaction-detail extraction, category confirmation/correction, financial datab
 
 | Symptom | Check |
 | --- | --- |
-| Unexpected test counts | Current source defines 54 Python and 42 Android checks. The direct-classifier predecessor had 27/14, and the retired MCP experiment had 43/16. Check the source-version note above. |
+| Unexpected test counts | Current source defines 54 Python and 53 Android checks. The personal-category predecessor had 54/42, direct-classifier predecessor had 27/14, and retired MCP experiment had 43/16. Check the source-version note above. |
 | Python not found / activation fails | Select a working Python 3.11 environment; use its executable directly if activation is blocked. |
 | No connected device | Enable USB debugging, approve the connection, and select the Pixel/emulator in Android Studio. |
 | Android build or Python bytecode compilation fails | Check the configured JDK, SDK components, Gradle sync, and build-time Python 3.11 matching the APK runtime. |
