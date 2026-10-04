@@ -12,6 +12,8 @@ For test locations, coverage, Windows commands, benchmarks, and manual checks, s
 
 For quick test commands, see the [test README](android-companion/python-tests/README.md). The SMS-simulator milestone is tagged `v0.11.0`.
 
+For future iPhone work, see the [iOS development guide](ios-companion/README.md): Android-to-iOS functionality mapping, platform restrictions, tools, and staged verification. It is a planning document; no iOS app exists yet. Update its feature checklist as the Android implementation grows.
+
 ## Progress — October 3, 2026
 
 - SMS capture and the Kotlin-to-embedded-Python JSON handoff work on the Pixel 7a running Android 17. Real-message screenshots showed receiver entry to handoff result of **185.242 ms** when Python started and **7.548 ms** with Python already running. JSON encoding alone took **0.077 ms** and **0.027 ms**, respectively. These are two observations, not performance guarantees; they exclude SMS delivery and the later hosted classification.
@@ -114,6 +116,7 @@ Generated builds, local SDK settings, virtual environments, and private phone da
 expense-tracker-with-mcp/
 ├── README.md
 ├── docs/wiki/Testing.md
+├── ios-companion/README.md
 └── android-companion/
     ├── README.md
     ├── app/build.gradle.kts

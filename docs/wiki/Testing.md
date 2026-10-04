@@ -20,6 +20,8 @@ Last verified: **October 4, 2026**. The current build is `0.11.0-sms-simulator`.
 
 There is no configured GitHub Actions workflow. A Git push does not currently execute these tests. Android Studio and Gradle are test runners; GitHub Actions could automate selected checks later.
 
+iOS development and proposed per-feature acceptance tests are tracked in the [iOS guide](../../ios-companion/README.md). No iOS project or tests are implemented or verified yet; the Android/Python counts above are not iOS results.
+
 The `v0.11.0` tag identifies this SMS-simulator milestone (`versionCode` 13, app version `0.11.0-sms-simulator`). A short [test README](../../android-companion/python-tests/README.md) provides the quick-start commands; this guide remains the detailed coverage reference. A Git tag is a source checkpoint, not an APK distribution or a GitHub Release.
 
 ## What gets tested in the normal flow
