@@ -1,8 +1,8 @@
-# Tests — v0.11.0 SMS simulator
+# Tests — 0.12.0 category review
 
 The full [testing guide](../../docs/wiki/Testing.md) lists test locations, coverage, Windows commands, timing measurements, and manual checks for both Python and Android.
 
-Verified on October 4, 2026: **54 Python tests and 53 Android checks passed**. Debug app/test APK builds, the unsigned release build, and Android lint passed. The debug app was installed on the Pixel 7a running Android 17 without clearing history or remembered keys. These results are from local runs, not GitHub Actions.
+Verified on October 4, 2026: **54 Python tests and 62 Android checks passed**. Debug app/test APK builds, unsigned release build, and Android lint passed. The debug app was installed on the Pixel 7a running Android 17 without clearing history or remembered keys. These are local runs, not GitHub Actions. Tag `v0.11.0` remains the older simulator checkpoint (54/53), not this review version.
 
 ## Run the offline Python suite
 
@@ -24,7 +24,14 @@ $env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'
 .\gradlew.bat :app:connectedDebugAndroidTest
 ```
 
-Expected result: **53 checks** across thirteen classes. This builds/installs development APKs and may restart the app. Tests use isolated synthetic history/settings and stubbed cloud scheduling or inference; they do not send SMS, clear real history, or make paid API calls.
+Expected result: **62 checks** across fifteen classes. This builds/installs development APKs and may restart the app. Tests use isolated synthetic history/settings and stubbed cloud scheduling or inference; they do not send SMS, clear real history, or make paid API calls.
+
+New category-review tests under `app/src/androidTest/java/com/abijith/expensetracker/`:
+
+- `CategoryReviewStoreInstrumentedTest.kt`: six checks for the uncertainty-only gate, custom-label persistence, original suggestion/timing preservation, paused capture, validation, stale/duplicate/cleared forms, separate message correlation, legacy loading and preserved feedback after reclassification.
+- `CategoryReviewUiInstrumentedTest.kt`: three checks for empty fields/examples, required labels, correlated submission and saved display in Chat, plus retryable failures that preserve drafts. UI callbacks are stubbed; no cloud calls.
+
+For a free manual review check, use an existing Expenditure with Not sure/Not sure. Open Chat, enter both labels, submit, and reopen the app to verify persistence. Do not clear real history as a test setup. Creating a new cloud prediction can cost money; saving review labels does not.
 
 The new simulator regression tests are in `app/src/androidTest/java/com/abijith/expensetracker/`:
 

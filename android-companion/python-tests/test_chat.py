@@ -30,6 +30,8 @@ class ChatHandoffTests(unittest.TestCase):
         self.assertIn("SMS capture tab", result["reply"])
         self.assertIn("not available yet", result["reply"])
         self.assertIn("two distinct OpenAI API keys", result["reply"])
+        self.assertIn("submit the two empty fields", result["reply"])
+        self.assertIn("does not train the model", result["reply"])
         self.assertNotIn("DEMO-PRIVATE-QUERY", json.dumps(result))
         self.assertEqual(set(result), {
             "schema_version", "message_id", "status", "reply", "processed_at_utc",

@@ -25,13 +25,29 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 
-/** App-owned chat UI; messages stay in memory for the current app session. */
+/** Ordinary chat is session-only; review cards come from persisted SMS history. */
 @Composable
-fun ChatScreen(state: ChatState, onSend: (String) -> Boolean) {
+fun ChatScreen(
+    state: ChatState,
+    onSend: (String) -> Boolean,
+    reviewMessages: List<CapturedSms> = emptyList(),
+    onConfirmCategory: suspend (String, String, String, String) -> Boolean = { _, _, _, _ -> false },
+) {
     var draft by rememberSaveable { mutableStateOf("") }
     val scrollState = rememberLazyListState()
+    val pending = reviewMessages.filter { it.needsCategoryReview() }
+    val reviewed = reviewMessages.filter { it.categoryReview != null }
     LaunchedEffect(state.messages.lastOrNull()?.id) {
-        if (state.messages.isNotEmpty()) scrollState.animateScrollToItem(state.messages.lastIndex)
+        // Do not hide an ordinary chat reply when a review is also pending.
+        if (state.messages.isNotEmpty() && (state.messages.size > 1 || pending.isEmpty())) {
+            scrollState.animateScrollToItem(state.messages.lastIndex)
+        }
+    }
+    LaunchedEffect(pending.map { it.id to it.classification?.attemptId }) {
+        if (pending.isNotEmpty() && state.messages.size <= 1) {
+            scrollState.animateScrollToItem(state.messages.size)
+        }
+        // After submission keep the saved card visible, rather than jumping to help.
     }
 
     Column(
@@ -39,8 +55,9 @@ fun ChatScreen(state: ChatState, onSend: (String) -> Boolean) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text("Finance Tracker", style = MaterialTheme.typography.headlineSmall)
-        Text("Built-in help is available. Expense tracking and AI answers are coming later.",
+        Text("Built-in help and uncertain-category review are available. Expense records and AI chat answers are coming later.",
             style = MaterialTheme.typography.bodySmall)
+        if (pending.isNotEmpty()) Text("${pending.size} payment(s) need a category. You can answer later.")
         LazyColumn(
             modifier = Modifier.weight(1f).fillMaxWidth(),
             state = scrollState,
@@ -59,6 +76,11 @@ fun ChatScreen(state: ChatState, onSend: (String) -> Boolean) {
                         }
                     }
                 }
+            }
+            // Store-backed items survive closing Chat or restarting the process.
+            // Prefix keys to avoid collisions with session-only chat message IDs.
+            items(pending + reviewed, key = { "review_${it.id}" }) { message ->
+                CategoryReviewCard(message, onConfirmCategory)
             }
         }
         if (state.sending) Text("Processing your message...")

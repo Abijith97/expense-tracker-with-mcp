@@ -2,7 +2,7 @@
 
 This is a **living development plan, not an implemented iPhone app**. There is no Xcode project, iOS executable, or verified iOS test suite in this repository yet. The developer currently has Windows and no Mac access.
 
-Last reviewed: **October 4, 2026**. Android baseline: tag `v0.11.0`, app version `0.11.0-sms-simulator`, version code 13. Android verification at that checkpoint: **54 Python tests and 53 Android checks passed**; debug app/test APK builds, unsigned release build, and lint passed. Those results do not establish iOS compatibility or live-model accuracy.
+Last reviewed: **October 4, 2026**. Current Android baseline: `0.12.0-category-review`, version code 14, with **54 Python tests and 62 Android checks passed**, plus debug app/test APKs, unsigned release APK and lint. Tag `v0.11.0` still identifies the preceding simulator checkpoint (code 13, 54/53). These results do not establish iOS compatibility or live-model accuracy.
 
 Keep developing Android until a message can become a saved expense and a useful spending summary. Prepare portable contracts now; start the iOS implementation once Mac access is available. Investigate iOS message-ingestion feasibility early rather than leaving that question until the entire project is finished.
 
@@ -53,7 +53,7 @@ Alternative approaches—hosting the Python helpers or investigating a separate 
 
 ## Functionality map and status
 
-All iOS implementation below is **planned/unverified**. "Android implemented" means present at `v0.11.0`, not proof that it is production-ready.
+All iOS implementation below is **planned/unverified**. "Android implemented" means present in the current Android baseline above, not proof of production readiness.
 
 | ID | Functionality | Android status/reference | Proposed iOS approach and main difference |
 | --- | --- | --- | --- |
@@ -68,7 +68,7 @@ All iOS implementation below is **planned/unverified**. "Android implemented" me
 | F09 | Async work and restart handling | Implemented: WorkManager and remembered-settings recovery. | Foreground async work first; separately investigate supported background execution. No always-running-service promise. |
 | F10 | Performance timings and calculated costs | Implemented: `SmsPerformance`, `LlmUsage`, `llm_usage.py`. | Equivalent measured stages and provider-reported usage; unavailable values stay unavailable. |
 | F11 | Transaction-detail extraction | Planned on Android. | Specify amount, currency, date/time, merchant/payee, direction, and ambiguity before porting. |
-| F12 | Category confirmation/correction | Planned on Android. | In-app review linked to a specific transaction; no automatic model-training claim. |
+| F12 | Category confirmation/correction | Implemented for uncertain pairs: `CategoryReview`, `CategoryReviewCard`, `SmsStore.confirmCategory`, and store-derived Chat forms. Confident-label corrections are still planned. | SwiftUI two-field form tied to the exact retained input/attempt; separate human annotation and no automatic learning claim. |
 | F13 | Expense ledger and deletion | Planned on Android; existing history is not a ledger. | Separate confirmed expense records from diagnostic messages; deletion/duplicate rules need definition. |
 | F14 | Spending queries, summaries, and reports | Planned on Android. | Compute from saved expenses; define date ranges/time zone and weekly delivery expectations. |
 | F15 | MCP/tool selection or autonomous agents | Deferred on Android. | No current MCP requirement; revisit for a future chatbot/tool-selection use case. |
@@ -151,14 +151,23 @@ Validate both strings and their pairing. Current result intent: `{"category":"ut
 - Do not copy a fixed price into this guide. Preserve dated rates/model/tier with each estimate and revalidate pricing when implementing. Estimated per-attempt costs are not the provider's final bill or a cumulative audit of retries.
 - **Verify:** Unicode JSON benchmarks, cold/warm native processing, delayed/failed mocked HTTP, retained per-stage data, no double-counting of reasoning/cache usage, and unknown totals never presented as free. Never benchmark live financial texts without consent.
 
-### F11–F15 — future finance and chatbot functions
+### F12 — uncertain-category review (Android implemented; iOS planned)
 
-These features are not implemented on Android or iOS yet. Define their contracts and acceptance tests when Android adds them:
+- Trigger only for a retained Expenditure with an identified `Not sure / Not sure` pair and no human annotation. Failed/Other results and confident categories do not get this form.
+- Show the original message/context, two initially empty fields, personal category/sub-category examples, and permission to enter custom labels such as clothing. Trim both labels; require 1–80 characters, no internal control characters, and neither label equal to `Not sure` case-insensitively.
+- Persist a separate optional `category_review` object: `category`, `sub_category`, `attempt_id`, `confirmed_at_millis`. The enclosing retained input provides the original SMS/message ID/body. Preserve model output, usage and timings; do not weaken the inference schema to accept arbitrary model labels.
+- Local submission needs no API key, upload or network, including while capture/cloud is paused. Match current input/attempt and reject duplicate/stale/cleared submissions. Do not resurrect cleared records. Later reclassification retains the original human annotation linked to its original attempt.
+- Derive forms from durable history, not an in-memory chat session or long-running LLM call. Pending forms remain indefinitely; saved labels survive relaunch. Unsaved drafts reset. Clear removes reviews with diagnostic copies. Editing, automatic prompt reuse, training, notifications and natural-language validation are not implemented on Android.
+- **Verify on iOS:** empty fields/examples, required/custom labels, exact input correlation across two pending forms, safe failure/retry, relaunch/old-history loading, pause/clear/stale guards and preserved model telemetry. Android reference tests: six `CategoryReviewStoreInstrumentedTest` and three `CategoryReviewUiInstrumentedTest` checks. They do not prove Swift behaviour.
+
+### F11, F13–F15 — future finance and chatbot functions
+
+Except for the limited F12 review above, the following features remain unimplemented on Android and iOS. Define contracts and acceptance tests as Android adds them:
 
 | Function | Decisions to capture | Minimum functional verification |
 | --- | --- | --- |
 | Transaction extraction | Amount precision/currency, merchant, transaction date versus capture date, time zone, direction, ambiguous/multiple transactions. | Exact amounts; missing fields require review; malformed/ambiguous output never silently becomes an expense. |
-| Category review | Original suggestion versus confirmed label, correlation, custom-category rules, no reply/late reply, and correction history. | Edit one selected transaction; another transaction is unchanged; no double insert; confirmation is not claimed to train weights. |
+| Extended category validation | Port current F12 first; later specify editing, confident-label correction, natural-language validation and deliberately reused feedback. | Preserve selected-record correlation, no accidental re-upload/training, and measured evaluation before claiming better predictions. |
 | Expense ledger/deletion | Record IDs, deduplication, diagnostic versus financial retention, confirmation/undo rules, and local POC scope. | One intended expense recorded once; reload correct; cancellation keeps data; confirmed deletion affects only selected records. |
 | Spending queries/reports | Date ranges, week start, currency, categories, averages, exclusions, and empty periods. | Fixed fixtures produce exact totals; incomplete/unknown records handled explicitly; corrections/deletions update summaries. |
 | Sunday 8 pm report | Local-time scheduling, notification permission, report generation versus delivery, and missed schedules. | Test timezone/empty-week cases; do not promise an exact background computation time on iOS. Separate reminders from generated reports. |

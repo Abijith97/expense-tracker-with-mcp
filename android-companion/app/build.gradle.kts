@@ -14,8 +14,8 @@ android {
         applicationId = "com.abijith.expensetracker"
         minSdk = 26
         targetSdk = 37
-        versionCode = 13
-        versionName = "0.11.0-sms-simulator"
+        versionCode = 14
+        versionName = "0.12.0-category-review"
 
         ndk {
             // Pixel 7a and 64-bit Windows-hosted Android emulators.

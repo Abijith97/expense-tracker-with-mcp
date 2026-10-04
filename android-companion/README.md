@@ -1,12 +1,12 @@
 # Android app — category identification and separate API keys
 
-The Android application provides its own Chat tab alongside SMS capture diagnostics, stage timings, and optional hosted expenditure classification. The Python orchestrator and classifier run inside the APK. App version: `0.11.0-sms-simulator` (`versionCode` 13). Debug builds also provide **Simulate SMS** to test without another phone.
+The Android application provides its own Chat tab alongside SMS capture diagnostics, stage timings, optional hosted expenditure classification, and local review forms for uncertain categories. The Python orchestrator and classifier run inside the APK. App version: `0.12.0-category-review` (`versionCode` 14). Debug builds also provide **Simulate SMS** to test without another phone.
 
 Chat currently calls the local `app_help.get_help` function for every message, including what the app can do and which finance features are planned. Chat does not yet perform LLM inference, record expenses, or answer spending questions. SMS classification calls `expenditure_classifier.classify_expenditure` directly, which can call OpenAI after you enter two dedicated keys and consent. The app runs without a WhatsApp account, Twilio, ngrok, or a separately hosted application backend.
 
 Capture starts **off** on a fresh installation. When you enable it and grant Android's SMS permission, the app retains newly received SMS messages in app-private local storage until you clear them. The screen initially shows 20 cards, with **Show older messages** for additional pages. Each entry contains the sender, body, SMS timestamp, capture timestamp, handoff status, and any classification result. All ordinary SMS messages are captured while enabled, including non-financial messages.
 
-The capture/chat entry points validate input and return a receipt or help without network calls. A separate background classification entry point calls the classifier directly, using Python's standard-library HTTPS client to call the OpenAI Responses API. No extra Python packages or separate phone Python installation are needed. Expenditures get a separate category-identification call; category confirmation, transaction-detail extraction, and finance-database updates are not implemented yet.
+The capture/chat entry points validate input and return a receipt or help without network calls. A background classification entry point calls the classifier through the standard-library HTTPS client and OpenAI Responses API. Expenditures get a separate category-identification call. Not sure/Not sure results get a Kotlin Chat form; submitted labels are saved locally, not passed through inference. No extra Python packages or phone Python installation are needed. Transaction-detail extraction and finance-database updates remain planned.
 
 Progress on October 3, 2026: the user reports that live phone classification is working and correctly predicts the messages tested. This is a manual sample check, not a measured accuracy percentage. Sender/source validation and ownership confirmation are intentionally deferred: a transaction alert copied by a friend can still be labelled Expenditure because the classifier sees only the body. It does not verify whose transaction it is, insert an expense, or change totals. See the [progress and scope decision](../README.md#progress--october-3-2026).
 
@@ -124,7 +124,7 @@ The app requests `RECEIVE_SMS` for Android's new-message broadcast and `INTERNET
 
 Only the SMS body is sent as the new prompt input, not the sender, message ID, or timestamps. The body is sent as-is: it can include personal information, account suffixes, reference numbers, or OTPs. This POC does not redact live bodies before uploading. All new captured SMS, including ordinary/non-financial SMS, are eligible while opted in. **Use synthetic SMS for demos and disable cloud when finished.** Stored examples in the prompt/tests are sanitized versions of the supplied 25 payment and nine non-payment samples, plus synthetic credit/OTP/failed-payment counterexamples.
 
-Enabling cloud does not retroactively upload saved messages. While capture and cloud are enabled, a saved card's **Classify this message (uploads body)** / **Reclassify (uploads body)** button schedules an explicit attempt. Results are diagnostic only: category suggestions are saved on capture cards, but no amount extraction, user confirmation, expense insertion, or training happens yet.
+Enabling cloud does not retroactively upload saved messages. While capture and cloud are enabled, a saved card's **Classify this message (uploads body)** / **Reclassify (uploads body)** button schedules an explicit attempt. Results are diagnostic only: uncertain categories can receive a human annotation, but no amount extraction, expense insertion, or training happens yet.
 
 This is direct personal API access for your own development phone, not a safe distribution design. Neither key is embedded, logged, saved in plaintext, or placed in WorkManager input. Opted-in keys are encrypted on disk; both still exist in client memory during use. OpenAI recommends keeping keys on a server for distributed apps. [OpenAI authentication/key guidance](https://developers.openai.com/api/reference/overview).
 
@@ -213,7 +213,23 @@ OPENAI/ChatGPT → learning/engineering; BMTC/metro/depot → utilities/transpor
 
 Python and Kotlin validate **both labels and their allowed pairing**. Structured output constrains format, not semantic correctness. Examples guide each request; they do not update model weights, learn automatically, or guarantee that all future payments to that payee have the same purpose. [Official OpenAI structured-output documentation](https://developers.openai.com/api/docs/guides/structured-outputs).
 
-New results display category and sub-category on the same SMS card. Old flat suggestions remain explicitly marked as legacy, with sub-category not recorded; they are not silently converted or uploaded. Reclassification is an explicit new chargeable attempt. The same category key, model, expenditure gate, timing measurements and per-attempt calculated-cost telemetry remain in use. More prompt examples can increase input tokens; actual reported counts continue to drive estimates. No category-confirmation or training workflow is implemented.
+New results display both suggested labels on the same SMS card. Old flat suggestions stay marked as legacy, with no invented sub-category or silent upload. Reclassification is an explicit new chargeable attempt. Model, keys, gates, cost telemetry and timings are unchanged. Uncertain current pairs can be reviewed using the form below; no training or automatic prompt update occurs.
+
+### Review an uncertain category in Chat
+
+1. Find an **Expenditure** card with **Not sure / Not sure**. The Chat tab shows a pending-review count and the SMS card directs you there. Already-saved uncertain pairs are eligible without another API call.
+2. Open **Chat** and find the form showing that SMS, sender and capture timestamp. Both **Category** and **Sub-category** fields start empty. If you have already chatted, scroll below the help replies to the forms.
+3. Use the displayed personal examples or your own labels. For a clothing purchase, you might choose `fun / clothing` or another category matching your finances; this is your choice, not an inferred default. The current model hierarchy does not include clothing.
+4. Enter both labels and tap **Submit category**. Each trimmed label must be 1–80 characters, with no internal control characters and not `Not sure` (case-insensitive). Submission is local, offline, and free of inference charges, even with capture/cloud paused.
+5. Confirm both Chat and the SMS card show **Confirmed category / Confirmed sub-category**. Close/reopen the app: submitted labels remain. Unsaved drafts reset, and unanswered reviews remain pending indefinitely.
+
+`CategoryReview.kt` defines the human annotation and uncertainty gate. `CategoryReviewCard.kt` owns the form, examples and retry feedback. `ChatScreen` derives forms from retained `SmsStore` history; `MainActivity` submits to `SmsStore.confirmCategory` on the IO dispatcher. Storage matches the exact message ID and analysis attempt, rejects duplicates/stale forms/cleared messages, and atomically persists an optional `category_review` object. Existing saved history without that object still loads.
+
+The record contains category, sub-category, original attempt ID and confirmation time, next to the original SMS. Model prediction, usage and timings remain separate. Custom human labels do not weaken the model's strict pair schema. A later reclassification retains the original human annotation; it does not silently replace it. Clearing captured copies deletes annotations too. There is no separate learning dataset, form editing, background notification, confident-category correction or free-text reply parsing yet.
+
+Reviewed SMS/labels can later inform sanitized few-shot examples or a separately evaluated training experiment. They are **not automatically reused** and do not retrain the model. Expand allowed prediction labels/schema before introducing custom labels into future prompts. This is a fixed human-in-the-loop workflow, not a model-directed agent tool loop. See the [feedback/agent explanation](../README.md#can-this-feedback-improve-the-llm-is-it-an-agent-loop).
+
+Verified October 4 for `0.12.0-category-review`: **54 Python tests and 62 Android checks passed** (including six review-store and three review-UI tests); debug app/test APKs, unsigned release APK, and lint passed. Updated on the Pixel without clearing history or remembered keys. No automated paid API calls or actual SMS sends. Use an existing Not sure/Not sure card for a free manual form check; generating a new live category prediction still requires explicit paid cloud opt-in.
 
 ### Manual personal-label checks
 
@@ -232,13 +248,13 @@ With keys/consent enabled, send **synthetic** SMS from another phone:
 | `Sent Rs.10 to Unknown Person. Ref DEMO` | Not sure → Not sure |
 | `Get cashback on your next recharge!` | Other; category stage skipped |
 
-Compare predictions with your intended labels; passing offline tests does not establish live model accuracy. Category failures preserve Expenditure. No expense ledger, category confirmation, or model training is included yet.
+Compare predictions with your intended labels; offline tests do not establish live model accuracy. Category failures preserve Expenditure and do not create review forms. No expense ledger or model training is included yet.
 
 ## Automated checks
 
 The [Markdown testing wiki](../docs/wiki/Testing.md) provides a detailed suite-by-suite guide, commands, timing boundaries, coverage limits, and troubleshooting.
 
-There are 54 Python unit tests on Windows and 53 Android checks: four bridge, one chat screen, three performance, three classifier-contract, six category-contract/routing, four isolated-store, seven consent/category/cost UI, three key settings/routing, four usage, six encrypted credential-recovery, one history-pagination, seven shared-processor, and four simulator-UI checks. All input messages are synthetic. Offline tests mock API responses or use a missing key; they make no real API requests and prove no model accuracy. Tests do not read your inbox, send SMS, or clear the app's saved capture history. Storage/processor tests use a separate synthetic cache directory, and consent/simulator UI tests use stub callbacks. The local-only simulator-entry test uses a wrapper-scoped permission without changing real app permissions.
+There are 54 Python unit tests and 62 Android checks across fifteen classes: the previous 53 plus six isolated category-review store checks and three review-form UI checks. All inputs are synthetic. HTTP is mocked/blocked or uses a missing key; there are no paid calls or accuracy claims. Tests do not read the inbox, send SMS, or clear real capture history. Review/store/processor tests use isolated files; form/consent/simulator tests use stub callbacks. The local-only simulator-entry test uses a wrapper-scoped permission without changing real app permissions.
 
 ### Python unit tests on Windows
 
@@ -284,7 +300,7 @@ This reports median and 95th-percentile processing time for 100 calls after warm
 
 The UI tests use Espresso `3.7.0`, AndroidX JUnit `1.3.0`, and the test runner `1.7.0`. The template's Espresso `3.5.1` failed on Android 17 while reflecting on `InputManager.getInstance`; [Espresso 3.7.0's release notes](https://developer.android.com/jetpack/androidx/releases/test#espresso-3.7.0) document the change to use `getSystemService` instead.
 
-1. Open one of the thirteen test classes under `app/src/androidTest/java/com/abijith/expensetracker/` in Android Studio: `PythonBridgeInstrumentedTest`, `ChatScreenInstrumentedTest`, `SmsPerformanceInstrumentedTest`, `ClassifierInstrumentedTest`, `CategoryInstrumentedTest`, `ClassificationStoreInstrumentedTest`, `CloudControlsInstrumentedTest`, `CloudKeysInstrumentedTest`, `LlmUsageInstrumentedTest`, `CloudPersistenceInstrumentedTest`, `SmsHistoryInstrumentedTest`, `SmsProcessorInstrumentedTest`, or `SmsSimulationInstrumentedTest`.
+1. Open any of the fifteen classes under `app/src/androidTest/java/com/abijith/expensetracker/` in Android Studio. New review tests are `CategoryReviewStoreInstrumentedTest` and `CategoryReviewUiInstrumentedTest`; the other thirteen classes remain unchanged.
 2. Connect your Pixel or start a supported emulator.
 3. Click the green run arrow beside the test class and choose **Run**. Android Studio installs the app and a separate test APK, then shows the results.
 
@@ -302,7 +318,7 @@ Personal category update verification: **54 Python tests and 42 Android checks p
 
 Simulator update verification on October 4: **54 Python tests and 53 Android checks passed**, plus debug app/test and unsigned release builds and lint. Version `0.11.0-sms-simulator` was installed on the Pixel without clearing captures or remembered credentials. No SMS or paid API calls were sent by the tests. Shared local submission works; actual cloud predictions remain a manual opt-in check.
 
-To run all thirteen application test classes from PowerShell, from `android-companion`:
+To run all fifteen application test classes from PowerShell, from `android-companion`:
 
 ```powershell
 $env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'
@@ -410,6 +426,7 @@ These files are under `app/src/main/java/com/abijith/expensetracker/`:
 |---|---|
 | `MainActivity.kt` | Chat/SMS tab navigation, capture controls, permission request/status, and SMS receipt/timing display. |
 | `ChatScreen.kt` | Chat message list, input, Send button, and reply/timing display. |
+| `CategoryReview.kt`, `CategoryReviewCard.kt` | Separate human annotation, uncertainty gate, correlated two-field form, examples, validation and save/retry UI. |
 | `ChatViewModel.kt` | Session conversation state, background chat processing, and rotation-safe state. |
 | `SmsReceiver.kt` | Receives/combines SMS parts, records reception timing, and calls the shared processor on its executor. |
 | `SmsProcessor.kt` | Shared off-main-thread save/handoff/scheduling path for real SMS and debug simulation; guards permission and pause/clear tokens. |

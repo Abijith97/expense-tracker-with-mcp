@@ -21,6 +21,7 @@ data class CapturedSms(
     val pythonHandoff: PythonHandoff? = null,
     val classification: SmsClassification? = null,
     val simulated: Boolean = false,
+    val categoryReview: CategoryReview? = null,
 )
 
 data class SmsCaptureState(
@@ -140,6 +141,22 @@ class SmsStore internal constructor(context: Context) {
         messages = state.value.messages.map(::interruptClassification),
     ))
 
+    /** Local human input works even with capture/cloud paused. Match the exact
+     * retained attempt so an old form cannot resurrect or overwrite a message.
+     * Reclassification preserves an existing human review rather than replacing it.
+     */
+    @Synchronized
+    fun confirmCategory(id: String, attempt: String, category: String, subCategory: String): Boolean {
+        val current = state.value
+        if (current.error != null || !validReviewLabel(category) || !validReviewLabel(subCategory)) return false
+        val message = current.messages.find { it.id == id } ?: return false
+        if (!message.needsCategoryReview() || message.classification?.attemptId != attempt) return false
+        val review = CategoryReview(category.trim(), subCategory.trim(), attempt, System.currentTimeMillis())
+        return save(current.copy(messages = current.messages.map {
+            if (it.id == id) it.copy(categoryReview = review) else it
+        }))
+    }
+
     private fun interruptClassification(message: CapturedSms): CapturedSms =
         if (message.classification?.status in setOf(ClassificationStatus.WAITING, ClassificationStatus.RUNNING)) {
             message.copy(classification = message.classification?.copy(status = ClassificationStatus.INTERRUPTED))
@@ -173,6 +190,7 @@ class SmsStore internal constructor(context: Context) {
                         receivedAtMillis = item.getLong("receivedAtMillis"),
                         simulated = item.optBoolean("simulated", false),
                         classification = item.optJSONObject("classification")?.let(SmsClassification::fromJson),
+                        categoryReview = item.optJSONObject("category_review")?.let(CategoryReview::fromJson),
                         pythonHandoff = item.optJSONObject("python_handoff")?.let { handoff ->
                             val status = HandoffStatus.valueOf(handoff.getString("status"))
                             if (status == HandoffStatus.PENDING) {
@@ -214,6 +232,7 @@ class SmsStore internal constructor(context: Context) {
                         .put("receivedAtMillis", message.receivedAtMillis)
                         .put("simulated", message.simulated)
                 message.classification?.let { item.put("classification", it.toJson()) }
+                message.categoryReview?.let { item.put("category_review", it.toJson()) }
                 message.pythonHandoff?.let { handoff ->
                     val result = JSONObject().put("status", handoff.status.name)
                     handoff.acknowledgement?.let { result.put("acknowledgement", it) }

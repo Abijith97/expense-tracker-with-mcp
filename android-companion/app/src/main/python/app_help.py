@@ -23,7 +23,11 @@ def get_help() -> str:
         "keeping the screen open. Disable cloud to forget both keys. Force Stop "
         "prevents receipt until you reopen the app. Captured history remains until "
         "you clear it; Show older messages displays additional cards.\n\n"
-        "Category confirmation, recording expenses, and spending summaries are "
-        "planned. They are not available yet. For now, every chat message "
+        "When an expenditure's category and sub-category are Not sure, open Chat "
+        "and submit the two empty fields on its review card. Examples are shown, "
+        "and custom labels are allowed. Submitted feedback stays on this phone; "
+        "it does not train the model or change future prompts automatically. "
+        "Recording expenses and spending summaries are planned, not available yet. "
+        "For now, every ordinary chat message "
         "returns this help information."
     )

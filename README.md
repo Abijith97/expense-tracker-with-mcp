@@ -2,15 +2,15 @@
 
 An Android-only POC for learning LLM-powered workflows and orchestration, with MCP reserved for a possible future user chatbot. The application provides the chat interface and captures new SMS on the same phone.
 
-**Available today:** the app has a Chat tab and an SMS capture tab. Chat calls a local help function through embedded Python and displays its reply. SMS capture retains incoming messages until cleared (20 cards per page) and displays Python's acknowledgement plus stage timings. Optional hosted classification calls the Python classifier directly to label messages **Expenditure** or **Other**, with separate inference timings. Expenditures then get a second hosted call to suggest your category/sub-category pair or return **Not sure** for both, displayed on the same card. Cards also show reported token usage and calculated per-attempt USD costs when supported, alongside all existing bottleneck timings. The debug build includes **Simulate SMS** for testing without another phone. App version: `0.11.0-sms-simulator`.
+**Available today:** the app has a Chat tab and an SMS capture tab. Ordinary chat messages receive local help through embedded Python. SMS capture retains incoming messages until cleared (20 cards per page), with acknowledgement and stage timings. Optional hosted classification labels messages **Expenditure** or **Other**; expenditures get a second hosted call to suggest a category/sub-category or return **Not sure** for both. For uncertain results, Chat shows a two-field review form with examples and custom labels. Submitted labels persist locally against that SMS, separately from the model suggestion. Cards retain token usage, calculated per-attempt USD costs, and bottleneck timings. Debug builds include **Simulate SMS**. App version: `0.12.0-category-review`.
 
-**Still planned:** transaction-detail extraction, expense storage, category confirmation/correction, and LLM chat answers. Every current chat message returns capability information; it does not yet interpret questions or record expenses.
+**Still planned:** transaction-detail extraction, expense storage, correction of confident suggestions, reuse of feedback in future prompts, and LLM chat answers. Ordinary chat messages still return help; only the correlated review form saves category input.
 
 Capture and built-in chat help work offline. Hosted classification needs internet, two dedicated API keys, and explicit upload consent. It needs no WhatsApp account, Twilio, ngrok, public webhook, or laptop service. Open the [Android project and setup guide](android-companion/README.md) to build, install, and run it.
 
 For test locations, coverage, Windows commands, benchmarks, and manual checks, see the [Markdown testing wiki](docs/wiki/Testing.md).
 
-For quick test commands, see the [test README](android-companion/python-tests/README.md). The SMS-simulator milestone is tagged `v0.11.0`.
+For quick test commands, see the [test README](android-companion/python-tests/README.md). The previous SMS-simulator milestone remains tagged `v0.11.0`; category review is the newer source version, not a moved tag.
 
 For future iPhone work, see the [iOS development guide](ios-companion/README.md): Android-to-iOS functionality mapping, platform restrictions, tools, and staged verification. It is a planning document; no iOS app exists yet. Update its feature checklist as the Android implementation grows.
 
@@ -24,7 +24,7 @@ For future iPhone work, see the [iOS development guide](ios-companion/README.md)
 
 **Scope decision:** sender/source validation and transaction ownership checks are deferred to avoid expanding the current POC. The classifier sees the SMS body, so a friend copying a bank alert can receive an Expenditure label. That label means the text describes an outgoing payment, not that the payment is verified as the user's. No source filter or ownership-confirmation feature has been added. Classification still does not insert an expense or affect spending totals.
 
-Category identification uses your 24 labelled examples and a personal category/sub-category hierarchy. Transaction-detail extraction, review, and a local expense database come next. Ownership validation can be revisited later.
+Category identification uses your 24 labelled examples and a personal category/sub-category hierarchy. Uncertain suggestions can now be reviewed in Chat; transaction-detail extraction and a local expense database come next. Ownership validation can be revisited later.
 
 ## Design decision: direct functions now, MCP later
 
@@ -64,11 +64,27 @@ OPENAI/ChatGPT → learning/engineering; BMTC/metro/depot → utilities/transpor
 
 Python and Kotlin validate **both labels and their allowed pairing**. Structured output constrains format, not semantic correctness. Examples guide each request; they do not update model weights, learn automatically, or guarantee that all future payments to that payee have the same purpose. [Official OpenAI structured-output documentation](https://developers.openai.com/api/docs/guides/structured-outputs).
 
-New results display category and sub-category on the same SMS card. Old flat suggestions remain explicitly marked as legacy, with sub-category not recorded; they are not silently converted or uploaded. Reclassification is an explicit new chargeable attempt. The same category key, model, expenditure gate, timing measurements and per-attempt calculated-cost telemetry remain in use. More prompt examples can increase input tokens; actual reported counts continue to drive estimates. No category-confirmation or training workflow is implemented.
+New results display category and sub-category on the same SMS card. Old flat suggestions remain marked as legacy and are not silently converted or uploaded. Reclassification is an explicit new chargeable attempt; keys, model, timing and cost telemetry are unchanged. Human input for a current Not sure/Not sure result is stored separately, never rewritten as the original model output. No training or automatic prompt update occurs.
 
 Category failures are separate from expenditure classification. An expense-labelled message remains Expenditure even if the second request fails; no category is invented. Results are saved on the original captured-message card, not in an expense ledger. Older cards remain readable without a category, and updates do not upload them automatically. Manual reclassification repeats both stages for expenditures.
 
-This adds a second API call/body upload, cost, and sequential latency for expenditures; Other messages use one call. Total analysis processing includes both stages; expenditure and category API timings are displayed separately. No human confirmation, transaction extraction, training, or expense insertion is included yet.
+This adds a second API call/body upload, cost, and sequential latency for expenditures; Other messages use one call. Total analysis processing includes both stages; expenditure and category API timings are displayed separately. Submitting a review is local and adds no inference charge. Transaction extraction, training, and expense insertion remain unimplemented.
+
+## Category validation: uncertain payments
+
+An Expenditure result with **Not sure / Not sure** creates a pending review in **Chat**. The tab shows the pending count; open it to find the original SMS and two initially empty fields: **Category** and **Sub-category**. Examples include learning/engineering, utilities/transport or groceries, and fun/gift. Custom labels such as a clothing sub-category are accepted: the model's current fixed hierarchy has no clothing option, so uncertainty here can be appropriate.
+
+Both labels must be nonblank, at most 80 characters, and not the Not sure sentinel. Tap **Submit category** to save trimmed labels and a confirmation timestamp against the exact message/analysis attempt. The Chat card and SMS history show the confirmed labels. This works offline and with capture/cloud paused, survives process restarts, and leaves the original model prediction/timings/costs intact. Unsubmitted drafts are not persisted; an unanswered review stays pending indefinitely. Clearing captured copies removes their reviews too, not the phone inbox.
+
+Forms are derived from saved history rather than a running model call. Duplicate submissions, stale analysis attempts, and cleared or non-uncertain messages cannot be submitted. Reclassification preserves an existing human annotation linked to its original attempt. Confident suggestions and failed calls do not create this form; review editing and natural-language validation are future work. No background notification or automatic tab switch is added.
+
+### Can this feedback improve the LLM? Is it an agent loop?
+
+The saved SMS and labels can become reviewed examples for future **few-shot prompts** or a deliberately designed training dataset. Saving feedback alone changes neither the prompt nor model weights. Prompt reuse is not implemented; before adding new labels to predictions, expand the Python/Kotlin allowed hierarchy and schema too, then evaluate on separate, unseen examples. Confirmation is useful data, not a measured improvement percentage. [OpenAI few-shot prompting guidance](https://developers.openai.com/api/docs/guides/prompt-engineering).
+
+This is a **human-in-the-loop LLM workflow**, with a human feedback step, not an autonomous agent loop. Code fixes the sequence: classify → categorize → if unsure, request human labels → save. An agent loop involves the model choosing tools/actions, observing their results, and deciding whether further actions or a final answer are needed. The form does not add that model-directed control. [OpenAI agent-loop guidance](https://developers.openai.com/api/docs/guides/agents/running-agents).
+
+Verified October 4 for `0.12.0-category-review`: **54 offline Python tests and 62 Android checks passed**, including six isolated review-storage and three form-UI checks. Debug app/test APKs, unsigned release APK, and lint passed. Installed on the Pixel 7a without clearing history or remembered keys. Tests use synthetic input and isolated/stubbed review storage, not paid inference or real SMS delivery.
 
 Verification for `0.8.0-message-costs`: **51 offline Python tests and 29 Android checks passed**; debug app/test APK builds and lint passed. The APK was installed on the Pixel 7a running Android 17 without clearing storage. No paid API calls were made; live category predictions still need a manual synthetic SMS check.
 
@@ -124,6 +140,7 @@ expense-tracker-with-mcp/
     │   ├── AndroidManifest.xml
     │   ├── java/com/abijith/expensetracker/
     │   │   ├── MainActivity.kt, ChatScreen.kt, ChatViewModel.kt
+    │   │   ├── CategoryReview.kt, CategoryReviewCard.kt
     │   │   ├── SmsReceiver.kt, SmsProcessor.kt, SmsPayload.kt, SmsStore.kt
     │   │   ├── PythonBridge.kt, SmsPerformance.kt, LlmUsage.kt
     │   │   ├── SmsClassification.kt, SmsClassificationWorker.kt, SmsCategory.kt
@@ -148,6 +165,8 @@ expense-tracker-with-mcp/
     │   ├── SmsPerformanceInstrumentedTest.kt
     │   ├── ClassifierInstrumentedTest.kt
     │   ├── CategoryInstrumentedTest.kt
+    │   ├── CategoryReviewStoreInstrumentedTest.kt
+    │   ├── CategoryReviewUiInstrumentedTest.kt
     │   ├── ClassificationStoreInstrumentedTest.kt
     │   ├── CloudControlsInstrumentedTest.kt
     │   ├── CloudKeysInstrumentedTest.kt
@@ -194,6 +213,10 @@ flowchart TB
         CategoryPython --> CategoryTool[category_identifier.identify_category<br/>few-shot category prompt and strict enum]
         CategoryTool -->|Result returns through orchestrator and bridge| Classified
         Classified --> SMSScreen
+        Classified -->|Expenditure and Not sure / Not sure| ReviewForm[Chat category review form<br/>empty category/sub-category fields and examples]
+        ReviewForm -->|User submits; no API call| Feedback[SmsStore category_review<br/>message ID, attempt ID, labels, timestamp]
+        Feedback --> ChatScreen
+        Feedback --> SMSScreen
         HelpTool -->|Result returns through orchestrator and bridge| ChatResult[Bridge checks reply or failure<br/>ChatViewModel updates conversation]
         ChatResult --> ChatScreen[Chat tab<br/>reply and elapsed time]
     end
@@ -206,6 +229,7 @@ flowchart TB
         Performance[3 performance checks<br/>JSON encoding, warm bridge, and timing format]
         ClassificationChecks[34 classifier, category, history, consent UI, key-routing, cost, and encrypted-recovery checks<br/>no valid API key or external requests]
         SimulationChecks[11 shared-processor and simulator UI checks<br/>isolated history and stubbed cloud scheduling]
+        ReviewChecks[9 category-review checks<br/>isolated persistence and stubbed form submission]
         Manual[Manual SMS and usability checks]
     end
     Unit -.->|Direct function calls| SMSPython
@@ -214,6 +238,8 @@ flowchart TB
     Integration -.->|Enter text, send, and switch tabs| Chat
     SimulationChecks -.->|Real packaged handoff, lifecycle guards| Process
     SimulationChecks -.->|Validation and charge-confirmation UI| Simulate
+    ReviewChecks -.->|Empty fields, examples, submit and retry| ReviewForm
+    ReviewChecks -.->|Persisted feedback and stale guards| Feedback
     Performance -.->|Synthetic message measurements| Bridge
     Unit -.->|Mock HTTP and validate parsing| ClassifyTool
     Unit -.->|Strict category parsing and safe failures| CategoryTool
@@ -243,7 +269,7 @@ flowchart TB
 
     Developer --> Studio[Android Studio Run test<br/>or Gradle connectedDebugAndroidTest]
     Studio --> Install[Build and install app plus test APK<br/>on Pixel or emulator]
-    Install --> Runner[AndroidJUnitRunner<br/>53 checks: bridge, UI, simulator/shared processor, performance, classification, categories, costs, and encrypted recovery]
+    Install --> Runner[AndroidJUnitRunner<br/>62 checks: bridge, UI, category review, simulator/shared processor, timing, classification, costs, and encrypted recovery]
     Runner --> Results[Android Studio or Gradle shows pass or fail]
 
     Developer --> Benchmark[Optional Python benchmark<br/>100 SMS handoffs after warm-up]
@@ -290,7 +316,7 @@ flowchart TB
     end
 ```
 
-SMS capture, local help, boolean classification, and category suggestions exist today. Transaction extraction, review, expense storage, query planning, MCP, and weekly reports in this goal diagram are future work. The intended database and orchestration run on the phone; no public application endpoint is needed.
+SMS capture, local help, boolean classification, category suggestions, and uncertain-category forms with saved feedback exist today. Transaction extraction, full correction/validation, expense storage, query planning, MCP, and weekly reports in this goal diagram are future work. The intended database and orchestration run on the phone; no public application endpoint is needed.
 
 MCP remains deferred. Both inference stages use the existing model and shared safe transport; expenditure prompts/results are unchanged. Category identification adds a second upload for expenditures, with updated consent text and separate category timings. The classifier does not select tools, write expenses, or train itself. Local help does not call the LLM. The current default and model override are documented in the [Android setup guide](android-companion/README.md#set-up-hosted-expenditure-classification).
 
@@ -300,7 +326,7 @@ MCP remains deferred. Both inference stages use the existing model and shared sa
 | --- | --- |
 | Financial-message classifier | Decide whether an SMS describes an expenditure; treat processing failures separately from non-financial messages. |
 | Category identification | Suggest a category or return uncertainty (implemented); transaction amount, merchant, currency, and date extraction comes later. |
-| Category validation | Interpret confirmation or correction in the app chat, using the stored pending transaction ID. |
+| Category validation | Implemented for uncertain results: correlated two-field Chat form saves human labels. Natural-language validation and correction of confident suggestions remain planned. |
 | Training / feedback | Save verified examples and merchant preferences for future predictions; model fine-tuning is a later experiment. A confirmation alone does not retrain a model or prove improved accuracy. |
 | User-query handler | Interpret spending questions and use approved database tools; MCP is a possible later tool interface. |
 
@@ -310,7 +336,7 @@ These are logical roles for learning, not five continuously running models. The 
 
 1. Initial live classification is working in the user's phone checks. Broaden the synthetic expenditure/other evaluation and optionally run the paid held-out evaluation to record accuracy and latency. Offline mocked tests do not establish model accuracy; sender/ownership validation is deferred.
 2. Evaluate the personal category/sub-category predictions, then add transaction-detail extraction; verify amount, merchant, currency, date, and uncertainty handling.
-3. Add category review, correction, saved feedback, and local SQLite expense storage.
+3. Extend the implemented uncertainty review to corrections and deliberate feedback reuse, then add local SQLite expense storage.
 4. Connect chat queries to the LLM and approved database tools; consider MCP at this point and replace the help-only response.
 5. Add weekly reports shown in the app, with Android scheduling/notifications if background reminders are needed.
 

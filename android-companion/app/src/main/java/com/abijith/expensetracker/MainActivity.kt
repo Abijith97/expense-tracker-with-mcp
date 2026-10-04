@@ -83,12 +83,22 @@ class MainActivity : ComponentActivity() {
                 Column(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
                     TabRow(selectedTabIndex = selectedTab) {
                         Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 },
-                            text = { Text("Chat") })
+                            text = { Column {
+                                Text("Chat")
+                                val pending = captureState.messages.count { it.needsCategoryReview() }
+                                if (pending > 0) Text("$pending to review", style = MaterialTheme.typography.labelSmall)
+                            } })
                         Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 },
                             text = { Text("SMS capture") })
                     }
                     if (selectedTab == 0) {
-                        ChatScreen(chatState, onSend = { chat.send(this@MainActivity, it) })
+                        ChatScreen(chatState, onSend = { chat.send(this@MainActivity, it) },
+                            reviewMessages = captureState.messages,
+                            onConfirmCategory = { id, attempt, category, subCategory ->
+                                withContext(Dispatchers.IO) {
+                                    store.confirmCategory(id, attempt, category, subCategory)
+                                }
+                            })
                     } else {
                         SmsDebugScreen(
                             state = captureState,
@@ -295,6 +305,13 @@ internal fun SmsDebugScreen(
                         SmsClassificationDetails(message.classification,
                             canClassify = capturing && cloudState.enabled,
                             onClassify = { onClassify(message.id) })
+                        message.categoryReview?.let {
+                            Text("Confirmed category: ${it.category}")
+                            Text("Confirmed sub-category: ${it.subCategory}")
+                            Text("Human feedback saved locally; original model suggestion is unchanged.",
+                                style = MaterialTheme.typography.bodySmall)
+                        }
+                        if (message.needsCategoryReview()) Text("Open Chat to submit this payment's category and sub-category.")
                         PythonHandoffDetails(message.pythonHandoff)
                     }
                 }
