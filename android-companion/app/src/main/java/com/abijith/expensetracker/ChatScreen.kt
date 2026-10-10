@@ -31,11 +31,13 @@ fun ChatScreen(
     state: ChatState,
     onSend: (String) -> Boolean,
     reviewMessages: List<CapturedSms> = emptyList(),
+    onEditCategory: suspend (String, String, String, String, Long) -> Boolean = { _, _, _, _, _ -> false },
+    onRecordExpenditure: suspend (String, String, Boolean) -> Boolean = { _, _, _ -> false },
     onConfirmCategory: suspend (String, String, String, String) -> Boolean = { _, _, _, _ -> false },
 ) {
     var draft by rememberSaveable { mutableStateOf("") }
     val scrollState = rememberLazyListState()
-    val pending = reviewMessages.filter { it.needsCategoryReview() }
+    val pending = reviewMessages.filter { it.needsCategoryValidation() }
     val reviewed = reviewMessages.filter { it.categoryReview != null }
     LaunchedEffect(state.messages.lastOrNull()?.id) {
         // Do not hide an ordinary chat reply when a review is also pending.
@@ -55,9 +57,9 @@ fun ChatScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text("Finance Tracker", style = MaterialTheme.typography.headlineSmall)
-        Text("Built-in help and uncertain-category review are available. Expense records and AI chat answers are coming later.",
+        Text("Help, recording choices and category validation are available. Expense records and AI chat answers are coming later.",
             style = MaterialTheme.typography.bodySmall)
-        if (pending.isNotEmpty()) Text("${pending.size} payment(s) need a category. You can answer later.")
+        if (pending.isNotEmpty()) Text("${pending.size} payment(s) need category validation. You can answer later.")
         LazyColumn(
             modifier = Modifier.weight(1f).fillMaxWidth(),
             state = scrollState,
@@ -80,7 +82,10 @@ fun ChatScreen(
             // Store-backed items survive closing Chat or restarting the process.
             // Prefix keys to avoid collisions with session-only chat message IDs.
             items(pending + reviewed, key = { "review_${it.id}" }) { message ->
-                CategoryReviewCard(message, onConfirmCategory)
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ExpenditureRecordingChoice(message, onRecordExpenditure)
+                    CategoryReviewCard(message, onEdit = onEditCategory, onConfirm = onConfirmCategory)
+                }
             }
         }
         if (state.sending) Text("Processing your message...")

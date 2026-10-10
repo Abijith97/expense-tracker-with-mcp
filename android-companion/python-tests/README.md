@@ -1,8 +1,8 @@
-# Tests — 0.12.0 category review
+# Tests — 0.13.0 expenditure review
 
 The full [testing guide](../../docs/wiki/Testing.md) lists test locations, coverage, Windows commands, timing measurements, and manual checks for both Python and Android.
 
-Verified on October 4, 2026: **54 Python tests and 62 Android checks passed**. Debug app/test APK builds, unsigned release build, and Android lint passed. The debug app was installed on the Pixel 7a running Android 17 without clearing history or remembered keys. These are local runs, not GitHub Actions. Tag `v0.11.0` remains the older simulator checkpoint (54/53), not this review version.
+Verified on October 10, 2026: **56 Python tests and 80 Android checks passed**. Debug app/test APK builds, unsigned release build, and Android lint passed. The debug app was installed on the Pixel 7a running Android 17 without clearing history or remembered keys. These are local runs, not GitHub Actions. Tag `v0.11.0` remains the older simulator checkpoint (54/53), not this review version.
 
 ## Run the offline Python suite
 
@@ -13,7 +13,7 @@ cd .\android-companion
 ..\.venv\Scripts\python.exe -m unittest discover -s python-tests -p "test_*.py" -v
 ```
 
-Expected result: `Ran 54 tests` and `OK`. Tests use synthetic inputs and mocked API responses; no phone or OpenAI key is required. They do not establish live model accuracy.
+Expected result: `Ran 56 tests` and `OK`. Tests use synthetic inputs and mocked API responses; no phone or OpenAI key is required. New checks cover sanitized credit-card repayment negatives, the 60-second timeout and server-requested retry deferral. They do not establish live model accuracy.
 
 ## Run the Android checks
 
@@ -24,14 +24,16 @@ $env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'
 .\gradlew.bat :app:connectedDebugAndroidTest
 ```
 
-Expected result: **62 checks** across fifteen classes. This builds/installs development APKs and may restart the app. Tests use isolated synthetic history/settings and stubbed cloud scheduling or inference; they do not send SMS, clear real history, or make paid API calls.
+Expected result: **80 checks** across seventeen classes. This builds/installs development APKs and may restart the app. Tests use isolated synthetic history/settings and stubbed cloud scheduling or inference; they do not send SMS, clear real history, or make paid API calls. Isolated UI tests use the debug-only `ComposeTestActivity`; the real chat screen test uses `MainActivity`.
 
 New category-review tests under `app/src/androidTest/java/com/abijith/expensetracker/`:
 
-- `CategoryReviewStoreInstrumentedTest.kt`: six checks for the uncertainty-only gate, custom-label persistence, original suggestion/timing preservation, paused capture, validation, stale/duplicate/cleared forms, separate message correlation, legacy loading and preserved feedback after reclassification.
-- `CategoryReviewUiInstrumentedTest.kt`: three checks for empty fields/examples, required labels, correlated submission and saved display in Chat, plus retryable failures that preserve drafts. UI callbacks are stubbed; no cloud calls.
+- `CategoryReviewStoreInstrumentedTest.kt`: eleven checks for predicted/uncertain pairs, custom-label persistence, original suggestion/timing preservation, paused capture, stale/duplicate/cleared forms, separate message correlation, legacy loading, recording choices and timestamp-checked editing.
+- `CategoryReviewUiInstrumentedTest.kt`: six checks for fields/examples, required labels, correlated submission and saved display, safe failure/retry, Yes/No, and edits/cancellation. UI callbacks are stubbed.
+- `RecordingChoiceInstrumentedTest.kt`: three checks for the initially off switch, select/exclude, failed saving and ineligible messages.
+- `InferenceRetryInstrumentedTest.kt`: seven checks for attempt limits/backoff, permanent errors, cancellation/time window, independent category retries, persisted counts and unknown total costs. Clocks, sleeps and API calls are injected.
 
-For a free manual review check, use an existing Expenditure with Not sure/Not sure. Open Chat, enter both labels, submit, and reopen the app to verify persistence. Do not clear real history as a test setup. Creating a new cloud prediction can cost money; saving review labels does not.
+For a free manual review check, use an existing Expenditure. Toggle recording, confirm the predicted pair with Yes, or use No/Not sure to enter both labels. Edit a saved category, test Cancel edit and Save changes, and reopen the app to verify persistence. Controls appear in Chat and SMS cards. Recording stores intent for the future ledger function; it does not insert an expense yet. Creating a new cloud prediction can cost money; saving choices/labels does not.
 
 The new simulator regression tests are in `app/src/androidTest/java/com/abijith/expensetracker/`:
 

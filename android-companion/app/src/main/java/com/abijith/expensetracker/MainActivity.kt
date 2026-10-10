@@ -85,7 +85,7 @@ class MainActivity : ComponentActivity() {
                         Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 },
                             text = { Column {
                                 Text("Chat")
-                                val pending = captureState.messages.count { it.needsCategoryReview() }
+                                val pending = captureState.messages.count { it.needsCategoryValidation() }
                                 if (pending > 0) Text("$pending to review", style = MaterialTheme.typography.labelSmall)
                             } })
                         Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 },
@@ -94,11 +94,9 @@ class MainActivity : ComponentActivity() {
                     if (selectedTab == 0) {
                         ChatScreen(chatState, onSend = { chat.send(this@MainActivity, it) },
                             reviewMessages = captureState.messages,
-                            onConfirmCategory = { id, attempt, category, subCategory ->
-                                withContext(Dispatchers.IO) {
-                                    store.confirmCategory(id, attempt, category, subCategory)
-                                }
-                            })
+                            onEditCategory = ::editCategory,
+                            onRecordExpenditure = ::chooseRecording,
+                            onConfirmCategory = ::confirmCategory)
                     } else {
                         SmsDebugScreen(
                             state = captureState,
@@ -140,6 +138,9 @@ class MainActivity : ComponentActivity() {
                                     submitSimulatedSms(this@MainActivity, store, sender, body, allowCloud)
                                 }
                             },
+                            onConfirmCategory = ::confirmCategory,
+                            onEditCategory = ::editCategory,
+                            onRecordExpenditure = ::chooseRecording,
                         )
                     }
                 }
@@ -199,6 +200,15 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private suspend fun confirmCategory(id: String, attempt: String, category: String, subCategory: String) =
+        withContext(Dispatchers.IO) { store.confirmCategory(id, attempt, category, subCategory) }
+
+    private suspend fun editCategory(id: String, reviewedAttempt: String, category: String, subCategory: String, version: Long) =
+        withContext(Dispatchers.IO) { store.editCategory(id, reviewedAttempt, category, subCategory, version) }
+
+    private suspend fun chooseRecording(id: String, attempt: String, selected: Boolean) =
+        withContext(Dispatchers.IO) { store.setRecordExpenditure(id, attempt, selected) }
+
     private fun hasSmsPermission(): Boolean =
         ContextCompat.checkSelfPermission(this, Manifest.permission.RECEIVE_SMS) ==
             PackageManager.PERMISSION_GRANTED
@@ -229,6 +239,9 @@ internal fun SmsDebugScreen(
     onDisableCloud: suspend () -> Unit,
     onClassify: (String) -> Unit,
     onSimulate: suspend (String, String, Boolean) -> Boolean = { _, _, _ -> false },
+    onConfirmCategory: suspend (String, String, String, String) -> Boolean = { _, _, _, _ -> false },
+    onEditCategory: suspend (String, String, String, String, Long) -> Boolean = { _, _, _, _, _ -> false },
+    onRecordExpenditure: suspend (String, String, Boolean) -> Boolean = { _, _, _ -> false },
 ) {
     val capturing = permissionGranted && state.enabled
     var visibleCount by rememberSaveable { mutableStateOf(SmsStore.PAGE_SIZE) }
@@ -305,13 +318,11 @@ internal fun SmsDebugScreen(
                         SmsClassificationDetails(message.classification,
                             canClassify = capturing && cloudState.enabled,
                             onClassify = { onClassify(message.id) })
-                        message.categoryReview?.let {
-                            Text("Confirmed category: ${it.category}")
-                            Text("Confirmed sub-category: ${it.subCategory}")
-                            Text("Human feedback saved locally; original model suggestion is unchanged.",
-                                style = MaterialTheme.typography.bodySmall)
+                        ExpenditureRecordingChoice(message, onRecordExpenditure)
+                        if (message.needsCategoryValidation() || message.categoryReview != null) {
+                            CategoryReviewCard(message, onEdit = onEditCategory,
+                                showMessage = false, onConfirm = onConfirmCategory)
                         }
-                        if (message.needsCategoryReview()) Text("Open Chat to submit this payment's category and sub-category.")
                         PythonHandoffDetails(message.pythonHandoff)
                     }
                 }

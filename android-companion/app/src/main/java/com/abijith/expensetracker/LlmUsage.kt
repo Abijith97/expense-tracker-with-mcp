@@ -63,6 +63,9 @@ data class LlmUsage(
 
 /** Only total the current attempt when every required stage has a known cost. */
 fun analysisEstimatedCostUsd(classification: SmsClassification): Double? {
+    // Prior timed-out calls may be billed without reporting usage. Do not present
+    // the final response's cost as the complete cost of an automatically retried run.
+    if (classification.networkAttempts > 1 || (classification.category?.networkAttempts ?: 0) > 1) return null
     val first = classification.usage?.estimatedCostUsd ?: return null
     return when (classification.status) {
         ClassificationStatus.OTHER, ClassificationStatus.FAILED -> first

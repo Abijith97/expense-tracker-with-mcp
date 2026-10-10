@@ -22,6 +22,8 @@ data class CapturedSms(
     val classification: SmsClassification? = null,
     val simulated: Boolean = false,
     val categoryReview: CategoryReview? = null,
+    // Null = no decision; false = excluded; true = selected for future recording.
+    val recordExpenditure: Boolean? = null,
 )
 
 data class SmsCaptureState(
@@ -99,7 +101,7 @@ class SmsStore internal constructor(context: Context) {
             message.classification?.status in setOf(ClassificationStatus.WAITING, ClassificationStatus.RUNNING)) return null
         val pending = SmsClassification(ClassificationStatus.WAITING, UUID.randomUUID().toString(), model)
         return if (save(current.copy(messages = current.messages.map {
-            if (it.id == id) it.copy(classification = pending) else it
+            if (it.id == id) it.copy(classification = pending, recordExpenditure = null) else it
         }))) pending else null
     }
 
@@ -150,10 +152,41 @@ class SmsStore internal constructor(context: Context) {
         val current = state.value
         if (current.error != null || !validReviewLabel(category) || !validReviewLabel(subCategory)) return false
         val message = current.messages.find { it.id == id } ?: return false
-        if (!message.needsCategoryReview() || message.classification?.attemptId != attempt) return false
+        if (!message.needsCategoryValidation() || message.classification?.attemptId != attempt) return false
         val review = CategoryReview(category.trim(), subCategory.trim(), attempt, System.currentTimeMillis())
         return save(current.copy(messages = current.messages.map {
             if (it.id == id) it.copy(categoryReview = review) else it
+        }))
+    }
+
+    /** Edit the latest human labels, never the model suggestion. The observed
+     * timestamp is a version token: stale editors must not overwrite newer input.
+     */
+    @Synchronized
+    fun editCategory(id: String, reviewedAttempt: String, category: String, subCategory: String,
+                     expectedConfirmedAtMillis: Long): Boolean {
+        val current = state.value
+        if (current.error != null || !validReviewLabel(category) || !validReviewLabel(subCategory)) return false
+        val message = current.messages.find { it.id == id } ?: return false
+        val review = message.categoryReview ?: return false
+        if (message.classification?.status != ClassificationStatus.EXPENDITURE ||
+            review.attemptId != reviewedAttempt || review.confirmedAtMillis != expectedConfirmedAtMillis) return false
+        val edited = review.copy(category = category.trim(), subCategory = subCategory.trim(),
+            confirmedAtMillis = maxOf(System.currentTimeMillis(), review.confirmedAtMillis + 1))
+        return save(current.copy(messages = current.messages.map { if (it.id == id) it.copy(categoryReview = edited) else it }))
+    }
+
+    /** This is an inclusion choice, not a posted expense or model-training job.
+     * Diagnostic SMS copies and labels remain accessible even when excluded.
+     */
+    @Synchronized
+    fun setRecordExpenditure(id: String, attempt: String, selected: Boolean): Boolean {
+        val current = state.value
+        val message = current.messages.find { it.id == id } ?: return false
+        if (current.error != null || message.classification?.status != ClassificationStatus.EXPENDITURE ||
+            message.classification.attemptId != attempt) return false
+        return save(current.copy(messages = current.messages.map {
+            if (it.id == id) it.copy(recordExpenditure = selected) else it
         }))
     }
 
@@ -191,6 +224,7 @@ class SmsStore internal constructor(context: Context) {
                         simulated = item.optBoolean("simulated", false),
                         classification = item.optJSONObject("classification")?.let(SmsClassification::fromJson),
                         categoryReview = item.optJSONObject("category_review")?.let(CategoryReview::fromJson),
+                        recordExpenditure = if (item.has("record_expenditure")) item.getBoolean("record_expenditure") else null,
                         pythonHandoff = item.optJSONObject("python_handoff")?.let { handoff ->
                             val status = HandoffStatus.valueOf(handoff.getString("status"))
                             if (status == HandoffStatus.PENDING) {
@@ -233,6 +267,7 @@ class SmsStore internal constructor(context: Context) {
                         .put("simulated", message.simulated)
                 message.classification?.let { item.put("classification", it.toJson()) }
                 message.categoryReview?.let { item.put("category_review", it.toJson()) }
+                message.recordExpenditure?.let { item.put("record_expenditure", it) }
                 message.pythonHandoff?.let { handoff ->
                     val result = JSONObject().put("status", handoff.status.name)
                     handoff.acknowledgement?.let { result.put("acknowledgement", it) }

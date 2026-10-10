@@ -11,6 +11,7 @@ import urllib.request
 
 ENDPOINT = "https://api.openai.com/v1/responses"
 MAX_RESPONSE_BYTES = 128000
+REQUEST_TIMEOUT_SECONDS = 60
 
 
 class InferenceError(Exception):
@@ -28,7 +29,7 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def send_request(payload, api_key):
-    """One HTTPS request, bounded response, no retries, 20-second socket timeout.
+    """One HTTPS request with a bounded response and 60-second socket timeout.
 
     Timeout applies to each blocking socket operation, not a total deadline.
     Run this in Android background work, not the SMS receiver or UI thread.
@@ -42,16 +43,21 @@ def send_request(payload, api_key):
         method="POST",
     )
     try:
-        with urllib.request.build_opener(_NoRedirect).open(request, timeout=20) as reply:
+        with urllib.request.build_opener(_NoRedirect).open(request, timeout=REQUEST_TIMEOUT_SECONDS) as reply:
             raw = reply.read(MAX_RESPONSE_BYTES + 1)
         if len(raw) > MAX_RESPONSE_BYTES:
             raise InferenceError("invalid_response")
         return json.loads(raw)
     except urllib.error.HTTPError as error:
         status = error.code
+        # Android owns retries and lifecycle checks. Do not retry sooner than a
+        # server hint: this POC defers hinted errors for a later manual attempt.
+        deferred = bool(error.headers and error.headers.get("Retry-After"))
         error.close()
-        code = {401: "authentication", 403: "access_denied", 429: "rate_limit_or_quota"}.get(
+        code = {401: "authentication", 403: "access_denied", 408: "timeout", 429: "rate_limit_or_quota"}.get(
             status, "service_unavailable" if status >= 500 else "request_rejected")
+        if deferred and (status == 408 or status >= 500):
+            code = "retry_deferred"
         raise InferenceError(code) from None
     except (TimeoutError, socket.timeout):
         raise InferenceError("timeout") from None

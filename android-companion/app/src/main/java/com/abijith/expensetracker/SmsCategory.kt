@@ -30,8 +30,10 @@ data class SmsCategory(
     val errorCode: String? = null,
     val usage: LlmUsage? = null,
     val subCategory: String? = null,
+    val networkAttempts: Int = 1,
 ) {
     init {
+        require(networkAttempts in 0..3)
         require(if (status == CategoryStatus.IDENTIFIED) {
             if (subCategory == null) name in LEGACY_SPENDING_CATEGORIES else isSpendingCategoryPair(name, subCategory)
         } else name == null && subCategory == null)
@@ -46,6 +48,7 @@ data class SmsCategory(
         apiElapsedMs?.let { value -> it.put("api_elapsed_ms", value) }
         errorCode?.let { value -> it.put("error_code", value) }
         usage?.let { value -> it.put("usage", value.toJson()) }
+        it.put("network_attempts", networkAttempts)
     }
 
     companion object {
@@ -57,6 +60,7 @@ data class SmsCategory(
             errorCode = json.optString("error_code").takeIf { it.isNotBlank() },
             usage = LlmUsage.fromJson(json.optJSONObject("usage")),
             subCategory = if (json.has("sub_category")) json.getString("sub_category") else null,
+            networkAttempts = json.optInt("network_attempts", 1),
         )
     }
 }

@@ -2,7 +2,7 @@
 
 This is a **living development plan, not an implemented iPhone app**. There is no Xcode project, iOS executable, or verified iOS test suite in this repository yet. The developer currently has Windows and no Mac access.
 
-Last reviewed: **October 4, 2026**. Current Android baseline: `0.12.0-category-review`, version code 14, with **54 Python tests and 62 Android checks passed**, plus debug app/test APKs, unsigned release APK and lint. Tag `v0.11.0` still identifies the preceding simulator checkpoint (code 13, 54/53). These results do not establish iOS compatibility or live-model accuracy.
+Last reviewed: **October 10, 2026**. Current Android baseline: `0.13.0-expenditure-review`, version code 15, with **56 Python tests and 80 Android checks passed**, plus debug app/test APKs, unsigned release APK and lint. Tag `v0.11.0` still identifies the preceding simulator checkpoint (code 13, 54/53). These results do not establish iOS compatibility or live-model accuracy.
 
 Keep developing Android until a message can become a saved expense and a useful spending summary. Prepare portable contracts now; start the iOS implementation once Mac access is available. Investigate iOS message-ingestion feasibility early rather than leaving that question until the entire project is finished.
 
@@ -68,10 +68,11 @@ All iOS implementation below is **planned/unverified**. "Android implemented" me
 | F09 | Async work and restart handling | Implemented: WorkManager and remembered-settings recovery. | Foreground async work first; separately investigate supported background execution. No always-running-service promise. |
 | F10 | Performance timings and calculated costs | Implemented: `SmsPerformance`, `LlmUsage`, `llm_usage.py`. | Equivalent measured stages and provider-reported usage; unavailable values stay unavailable. |
 | F11 | Transaction-detail extraction | Planned on Android. | Specify amount, currency, date/time, merchant/payee, direction, and ambiguity before porting. |
-| F12 | Category confirmation/correction | Implemented for uncertain pairs: `CategoryReview`, `CategoryReviewCard`, `SmsStore.confirmCategory`, and store-derived Chat forms. Confident-label corrections are still planned. | SwiftUI two-field form tied to the exact retained input/attempt; separate human annotation and no automatic learning claim. |
+| F12 | Category confirmation/correction | Implemented: `CategoryReviewCard` Yes/No, unknown/correction forms, `SmsStore.confirmCategory` and timestamp-checked `editCategory`; controls in Chat and SMS cards. | SwiftUI confirmation and editable forms tied to exact retained input/attempt/review version; separate human annotation. |
 | F13 | Expense ledger and deletion | Planned on Android; existing history is not a ledger. | Separate confirmed expense records from diagnostic messages; deletion/duplicate rules need definition. |
 | F14 | Spending queries, summaries, and reports | Planned on Android. | Compute from saved expenses; define date ranges/time zone and weekly delivery expectations. |
 | F15 | MCP/tool selection or autonomous agents | Deferred on Android. | No current MCP requirement; revisit for a future chatbot/tool-selection use case. |
+| F16 | Recording choice | Implemented: `ExpenditureRecordingChoice` and `SmsStore.setRecordExpenditure`; persists intent, not a ledger entry. | An initially off switch for each Expenditure, with saved inclusion choice independent of category labels. |
 
 Android Kotlin references live under `../android-companion/app/src/main/java/com/abijith/expensetracker/`; Python references under `../android-companion/app/src/main/python/`. The simulator is under `app/src/debug`, not the main source set. The [Android code map](../android-companion/README.md#code-map) describes current responsibilities.
 
@@ -104,7 +105,7 @@ For automatic capture, F02 also needs a **separate feasibility result**: identif
 
 ### F05 — expenditure classification
 
-- Reuse sanitized classification examples and the existing prompt intent: completed outgoing payment is true; advertisement, loan offer, OTP, failed payment, or incoming credit is not expenditure.
+- Reuse sanitized classification examples and the existing prompt intent: completed purchases are expenditures; advertisements, loan offers, OTPs, failed payments, incoming credits, and credit-card bill repayments are not. Card purchases still count; repayment/settlement of the card bill must not count again, including bank/UPI debits explicitly paying that bill.
 - Decode an actual boolean; `"true"`, `1`, a malformed response, refusal, timeout, and authentication failure must not become a successful false/Other result.
 - Keep body-only classification distinct from ownership verification: a copied bank alert can describe expenditure without proving that it belongs to this user. Source/ownership checks remain deferred.
 - **Verify:** mocked positive/negative outputs, invalid types/envelopes, safe failure states, and correlation to the original message. Live prediction checks require explicit paid opt-in; mocked tests are not accuracy measurements.
@@ -131,6 +132,7 @@ Validate both strings and their pairing. Current result intent: `{"category":"ut
 - Decide Keychain accessibility, device-lock behaviour, backup/synchronization policy, and forget/reset semantics before promising background recovery. Keychain storage is not a guarantee against a compromised device/app.
 - Disable/forget must remove remembered authorization and invalidate old sessions. Missing/unreadable credentials fail closed; UI/public state/logs must not expose them.
 - Use an injectable HTTPS transport, such as `URLSession` with async/await; retain explicit timeout, safe-error, redirect/endpoint, and response-validation behaviour from `llm_api.py`. Network work must not block UI. [Apple URLSession guidance](https://developer.apple.com/videos/play/wwdc2021/10095/).
+- Android now uses a 60-second socket-operation timeout and at most two retries per stage for timeout/network/server errors, with backoff/jitter. A 240-second stage window stops scheduling new retries; it is not an absolute in-flight deadline. Recheck consent, permission, cancellation and record identity before retry and during backoff. Retry category independently. Authentication/quota/configuration errors and server-hinted delays are left for a later manual retry. Use one retry owner to prevent multiplied calls; define equivalent URLSession semantics during the port.
 - **Verify:** distinct-key checks, consent required, key routing, isolated remembered recovery/forget/failures, HTTP mocked, and secrets absent from logs/storage fixtures. Treat uploads as chargeable even when the result later times out.
 
 ### F08/F09 — persistence and lifecycle
@@ -149,16 +151,25 @@ Validate both strings and their pairing. Current result intent: `{"category":"ut
 - Pasted/simulated input has no real SMS delivery/receiver latency. Omit those measurements rather than displaying zero or labelling local processing as detection time.
 - Port the behavioural tests in `test_usage.py`/`LlmUsageInstrumentedTest`: actual reported tokens feed calculated estimates, unsupported/missing prices or usage stay unavailable, both stage costs combine only when known, and failures retain available usage/timing.
 - Do not copy a fixed price into this guide. Preserve dated rates/model/tier with each estimate and revalidate pricing when implementing. Estimated per-attempt costs are not the provider's final bill or a cumulative audit of retries.
+- Preserve request counts for each stage. After an automatic retry, final-response token/cost data is only partial; show the combined analysis cost as unavailable. Total/category elapsed times include their attempts and backoff; API timings describe the final request.
 - **Verify:** Unicode JSON benchmarks, cold/warm native processing, delayed/failed mocked HTTP, retained per-stage data, no double-counting of reasoning/cache usage, and unknown totals never presented as free. Never benchmark live financial texts without consent.
 
-### F12 — uncertain-category review (Android implemented; iOS planned)
+### F12 — category validation and editing (Android implemented; iOS planned)
 
-- Trigger only for a retained Expenditure with an identified `Not sure / Not sure` pair and no human annotation. Failed/Other results and confident categories do not get this form.
+- For a retained Expenditure with an identified pair and no human annotation, show Yes/No for a predicted pair. Yes saves the suggestion; No opens the blank correction form. `Not sure / Not sure` opens that form directly. Failed/Other results do not get a new validation form.
 - Show the original message/context, two initially empty fields, personal category/sub-category examples, and permission to enter custom labels such as clothing. Trim both labels; require 1–80 characters, no internal control characters, and neither label equal to `Not sure` case-insensitively.
 - Persist a separate optional `category_review` object: `category`, `sub_category`, `attempt_id`, `confirmed_at_millis`. The enclosing retained input provides the original SMS/message ID/body. Preserve model output, usage and timings; do not weaken the inference schema to accept arbitrary model labels.
 - Local submission needs no API key, upload or network, including while capture/cloud is paused. Match current input/attempt and reject duplicate/stale/cleared submissions. Do not resurrect cleared records. Later reclassification retains the original human annotation linked to its original attempt.
-- Derive forms from durable history, not an in-memory chat session or long-running LLM call. Pending forms remain indefinitely; saved labels survive relaunch. Unsaved drafts reset. Clear removes reviews with diagnostic copies. Editing, automatic prompt reuse, training, notifications and natural-language validation are not implemented on Android.
-- **Verify on iOS:** empty fields/examples, required/custom labels, exact input correlation across two pending forms, safe failure/retry, relaunch/old-history loading, pause/clear/stale guards and preserved model telemetry. Android reference tests: six `CategoryReviewStoreInstrumentedTest` and three `CategoryReviewUiInstrumentedTest` checks. They do not prove Swift behaviour.
+- Saved labels offer Edit category with prefilled fields, Save changes and Cancel edit. Saving checks the original reviewed attempt and observed confirmation timestamp; an intervening edit rejects a stale submission. Preserve the original model output and replace only the latest human annotation; there is no complete edit audit yet.
+- Derive forms from durable history, not an in-memory chat session or long-running LLM call. Pending forms remain indefinitely; saved labels survive relaunch. Unsaved drafts reset. Clear removes reviews with diagnostic copies. Automatic prompt reuse, training, notifications and natural-language validation are not implemented on Android.
+- **Verify on iOS:** Yes/No, empty fields/examples, required/custom labels, prefilled edits/cancel/save, stale editor rejection, exact input correlation, safe failure/retry, relaunch/old-history loading, pause/clear guards and preserved model telemetry. Android references: eleven `CategoryReviewStoreInstrumentedTest` and six `CategoryReviewUiInstrumentedTest` checks. They do not prove Swift behaviour.
+
+### F16 — recording intent (Android implemented; iOS planned)
+
+- Ask whether to record each classified Expenditure. Default the switch off; persist an optional `record_expenditure` value: absent means undecided, false means excluded, true means selected. Keep the diagnostic card visible in every state.
+- Save locally using the current message/attempt identity, including while capture/cloud is paused. Reject Other/failed, stale or cleared records. A failed save must leave the displayed switch at the persisted value and permit retry.
+- Inclusion and category review are separate choices. Reclassification resets inclusion to undecided while retaining the separate human review. The future ledger function must consume the inclusion choice; selecting it currently creates no ledger entry and trains no model.
+- **Verify on iOS:** default off, select/exclude, restart persistence, safe failure, stale/cleared guards, and reclassification reset. Android references: three `RecordingChoiceInstrumentedTest` checks plus inclusion cases in `CategoryReviewStoreInstrumentedTest`.
 
 ### F11, F13–F15 — future finance and chatbot functions
 
@@ -167,7 +178,7 @@ Except for the limited F12 review above, the following features remain unimpleme
 | Function | Decisions to capture | Minimum functional verification |
 | --- | --- | --- |
 | Transaction extraction | Amount precision/currency, merchant, transaction date versus capture date, time zone, direction, ambiguous/multiple transactions. | Exact amounts; missing fields require review; malformed/ambiguous output never silently becomes an expense. |
-| Extended category validation | Port current F12 first; later specify editing, confident-label correction, natural-language validation and deliberately reused feedback. | Preserve selected-record correlation, no accidental re-upload/training, and measured evaluation before claiming better predictions. |
+| Extended category validation | Port current F12 first; later specify natural-language validation and deliberately reused feedback. | Preserve selected-record correlation, no accidental re-upload/training, and measured evaluation before claiming better predictions. |
 | Expense ledger/deletion | Record IDs, deduplication, diagnostic versus financial retention, confirmation/undo rules, and local POC scope. | One intended expense recorded once; reload correct; cancellation keeps data; confirmed deletion affects only selected records. |
 | Spending queries/reports | Date ranges, week start, currency, categories, averages, exclusions, and empty periods. | Fixed fixtures produce exact totals; incomplete/unknown records handled explicitly; corrections/deletions update summaries. |
 | Sunday 8 pm report | Local-time scheduling, notification permission, report generation versus delivery, and missed schedules. | Test timezone/empty-week cases; do not promise an exact background computation time on iOS. Separate reminders from generated reports. |

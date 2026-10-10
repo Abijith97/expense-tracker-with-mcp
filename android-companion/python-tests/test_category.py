@@ -113,7 +113,7 @@ class CategoryIdentificationTests(unittest.TestCase):
             request = factory.return_value.open.call_args.args[0]
             self.assertEqual(request.full_url, llm_api.ENDPOINT)
             self.assertEqual(request.get_header("Authorization"), "Bearer DEMO-KEY")
-            self.assertEqual(factory.return_value.open.call_args.kwargs["timeout"], 20)
+            self.assertEqual(factory.return_value.open.call_args.kwargs["timeout"], 60)
             uploaded = json.loads(request.data)
             self.assertIs(uploaded["store"], False)
             self.assertEqual(uploaded["input"][-1]["content"], "DEMO-PRIVATE-BODY")

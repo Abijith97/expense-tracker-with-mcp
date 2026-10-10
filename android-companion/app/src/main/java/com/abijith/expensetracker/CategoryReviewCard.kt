@@ -8,6 +8,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -27,29 +28,59 @@ import java.util.Date
 @Composable
 internal fun CategoryReviewCard(
     message: CapturedSms,
+    onEdit: suspend (String, String, String, String, Long) -> Boolean = { _, _, _, _, _ -> false },
+    showMessage: Boolean = true,
     onConfirm: suspend (String, String, String, String) -> Boolean,
 ) {
     val attempt = message.classification?.attemptId.orEmpty()
-    var category by remember(message.id, attempt) { mutableStateOf("") }
-    var subCategory by remember(message.id, attempt) { mutableStateOf("") }
-    var saving by remember(message.id, attempt) { mutableStateOf(false) }
-    var error by remember(message.id, attempt) { mutableStateOf(false) }
+    val review = message.categoryReview
+    var category by remember(message.id, attempt, review) { mutableStateOf(review?.category.orEmpty()) }
+    var subCategory by remember(message.id, attempt, review) { mutableStateOf(review?.subCategory.orEmpty()) }
+    var editing by remember(message.id, attempt, review) { mutableStateOf(false) }
+    var saving by remember(message.id, attempt, review) { mutableStateOf(false) }
+    var error by remember(message.id, attempt, review) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    fun saveLabels(categorySnapshot: String, subCategorySnapshot: String) {
+        saving = true
+        scope.launch {
+            try {
+                error = if (review == null) !onConfirm(message.id, attempt, categorySnapshot, subCategorySnapshot)
+                    else !onEdit(message.id, review.attemptId, categorySnapshot, subCategorySnapshot, review.confirmedAtMillis)
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { error = true }
+            finally { saving = false }
+        }
+    }
     OutlinedCard(Modifier.fillMaxWidth().testTag("category_review_${message.id}")) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(if (message.categoryReview == null) "Which category fits this payment?" else "Category saved",
+            Text(if (review == null) "Which category fits this payment?" else "Category saved",
                 style = MaterialTheme.typography.titleMedium)
-            Text("From: ${message.sender}")
-            Text("Captured: ${DateFormat.getDateTimeInstance().format(Date(message.receivedAtMillis))}",
-                style = MaterialTheme.typography.bodySmall)
-            Text(message.body)
-            val review = message.categoryReview
-            if (review != null) {
+            if (showMessage) {
+                Text("From: ${message.sender}")
+                Text("Captured: ${DateFormat.getDateTimeInstance().format(Date(message.receivedAtMillis))}",
+                    style = MaterialTheme.typography.bodySmall)
+                Text(message.body)
+            }
+            if (review != null && !editing) {
                 Text("Confirmed category: ${review.category}")
                 Text("Confirmed sub-category: ${review.subCategory}")
                 Text("Saved on this phone, not model training.", style = MaterialTheme.typography.bodySmall)
-            } else if (message.needsCategoryReview()) {
-                Text("The model returned Not sure. Enter your own labels or use these examples:")
+                if (message.classification?.status == ClassificationStatus.EXPENDITURE) {
+                    OutlinedButton(onClick = { editing = true }, modifier = Modifier.testTag("review_edit_${message.id}")) {
+                        Text("Edit category")
+                    }
+                }
+            } else if (message.needsCategoryValidation() && !message.needsCategoryReview() && !editing) {
+                val suggestion = message.classification!!.category!!
+                Text("Suggested: ${suggestion.name} / ${suggestion.subCategory}")
+                Text("Was this predicted correctly?")
+                Button(enabled = !saving, modifier = Modifier.testTag("review_yes_${message.id}"),
+                    onClick = { saveLabels(suggestion.name!!, suggestion.subCategory!!) }) { Text("Yes") }
+                OutlinedButton(enabled = !saving, modifier = Modifier.testTag("review_no_${message.id}"),
+                    onClick = { category = ""; subCategory = ""; editing = true }) { Text("No, correct it") }
+            } else if (message.needsCategoryValidation() || editing) {
+                Text(if (review != null) "Edit your saved labels. Original model output is unchanged."
+                    else "Enter your own labels or use these examples:")
                 Text("learning / engineering\nutilities / transport, food, prepaid recharge, groceries, health\nfun / gift, food",
                     style = MaterialTheme.typography.bodySmall)
                 Text("Custom labels are welcome, including clothing. Choose the category that fits your finances.",
@@ -62,28 +93,19 @@ internal fun CategoryReviewCard(
                     modifier = Modifier.fillMaxWidth().testTag("review_subcategory_${message.id}"))
                 Text("Both fields are required (up to 80 characters each). Submit saves feedback locally; no API call.",
                     style = MaterialTheme.typography.bodySmall)
-                if (error) Text("Could not save. The message may have changed or been cleared. Check it and try again.",
-                    color = MaterialTheme.colorScheme.error)
                 Button(
                     enabled = !saving && validReviewLabel(category) && validReviewLabel(subCategory),
                     modifier = Modifier.testTag("review_submit_${message.id}"),
                     onClick = {
-                        val categorySnapshot = category.trim()
-                        val subCategorySnapshot = subCategory.trim()
-                        saving = true
-                        scope.launch {
-                            try {
-                                error = !onConfirm(message.id, attempt, categorySnapshot, subCategorySnapshot)
-                            } catch (cancelled: CancellationException) {
-                                throw cancelled
-                            } catch (_: Exception) {
-                                // Never put input or storage exception details in logs/UI.
-                                error = true
-                            } finally { saving = false }
-                        }
+                        saveLabels(category.trim(), subCategory.trim())
                     },
-                ) { Text(if (saving) "Saving..." else "Submit category") }
+                ) { Text(if (saving) "Saving..." else if (review != null) "Save changes" else "Submit category") }
+                if (review != null) OutlinedButton(enabled = !saving, onClick = {
+                    category = review.category; subCategory = review.subCategory; editing = false; error = false
+                }) { Text("Cancel edit") }
             }
+            if (error) Text("Could not save. The message may have changed or been cleared. Check it and try again.",
+                color = MaterialTheme.colorScheme.error)
         }
     }
 }

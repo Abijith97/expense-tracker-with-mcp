@@ -97,6 +97,68 @@ class CategoryReviewStoreInstrumentedTest {
         assertFalse(store.state.value.messages.single().needsCategoryReview())
     }
 
+    @Test fun recordingChoicePersistsWhilePausedAndKeepsTheSmsAndLabels() {
+        val store = populatedStore()
+        assertNull(store.state.value.messages.single().recordExpenditure)
+        assertTrue(store.setEnabled(false))
+        assertTrue(store.setRecordExpenditure(message.id, suggestion.attemptId, true))
+        assertEquals(true, SmsStore(context).state.value.messages.single().recordExpenditure)
+        assertTrue(store.setRecordExpenditure(message.id, suggestion.attemptId, false))
+        val excluded = SmsStore(context).state.value.messages.single()
+        assertEquals(false, excluded.recordExpenditure)
+        assertEquals(message.body, excluded.body)
+        assertEquals(suggestion, excluded.classification)
+    }
+
+    @Test fun recordingRejectsStaleClearedAndNonExpenditureCards() {
+        val store = populatedStore()
+        assertFalse(store.setRecordExpenditure(message.id, "stale", true))
+        val other = message.copy(id = "other", classification = suggestion.copy(status = ClassificationStatus.OTHER))
+        assertTrue(store.append(other, store.activeGeneration()!!))
+        assertFalse(store.setRecordExpenditure(other.id, suggestion.attemptId, true))
+        assertTrue(store.clear())
+        assertFalse(store.setRecordExpenditure(message.id, suggestion.attemptId, true))
+    }
+
+    @Test fun confidentCategoryCanBeConfirmedWithoutChangingPrediction() {
+        val store = SmsStore(context)
+        assertTrue(store.setEnabled(true))
+        val predicted = message.copy(classification = suggestion.copy(category = SmsCategory(CategoryStatus.IDENTIFIED,
+            "utilities", subCategory = "transport")))
+        assertTrue(predicted.needsCategoryValidation())
+        assertTrue(store.append(predicted, store.activeGeneration()!!))
+        assertTrue(store.confirmCategory(predicted.id, suggestion.attemptId, "utilities", "transport"))
+        assertEquals(predicted.classification, store.state.value.messages.single().classification)
+        assertFalse(store.state.value.messages.single().needsCategoryValidation())
+    }
+
+    @Test fun savedLabelsAreEditableButStaleEditorsCannotOverwriteNewInput() {
+        val store = populatedStore()
+        assertTrue(store.confirmCategory(message.id, suggestion.attemptId, "fun", "clothing"))
+        val original = store.state.value.messages.single().categoryReview!!
+        assertTrue(store.editCategory(message.id, original.attemptId, "utilities", "clothing", original.confirmedAtMillis))
+        val saved = SmsStore(context).state.value.messages.single()
+        assertEquals("utilities", saved.categoryReview!!.category)
+        assertEquals("clothing", saved.categoryReview.subCategory)
+        assertTrue(saved.categoryReview.confirmedAtMillis > original.confirmedAtMillis)
+        assertEquals(suggestion, saved.classification)
+        assertFalse(store.editCategory(message.id, original.attemptId, "fun", "gift", original.confirmedAtMillis))
+        assertFalse(store.editCategory(message.id, original.attemptId, "", "gift", saved.categoryReview.confirmedAtMillis))
+        assertTrue(store.clear())
+        assertFalse(store.editCategory(message.id, original.attemptId, "fun", "gift", saved.categoryReview.confirmedAtMillis))
+    }
+
+    @Test fun reclassificationResetsRecordingIntentWithoutLosingHumanLabels() {
+        val store = populatedStore()
+        assertTrue(store.setRecordExpenditure(message.id, suggestion.attemptId, true))
+        assertTrue(store.confirmCategory(message.id, suggestion.attemptId, "fun", "clothing"))
+        val review = store.state.value.messages.single().categoryReview
+        assertNotNull(store.prepareClassification(message.id, store.activeGeneration()!!, DEFAULT_CLASSIFIER_MODEL))
+        assertNull(store.state.value.messages.single().recordExpenditure)
+        assertEquals(review, store.state.value.messages.single().categoryReview)
+        assertFalse(store.setRecordExpenditure(message.id, suggestion.attemptId, true))
+    }
+
     @Test fun separateFormsSaveOnlyTheirCorrespondingSms() {
         val store = populatedStore()
         val other = message.copy(id = "demo-second", classification = suggestion.copy(attemptId = "second-attempt"))

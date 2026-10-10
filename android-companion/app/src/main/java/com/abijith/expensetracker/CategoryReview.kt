@@ -42,3 +42,10 @@ internal fun CapturedSms.needsCategoryReview(): Boolean = categoryReview == null
     classification.category?.let {
         it.status == CategoryStatus.IDENTIFIED && it.name == "Not sure" && it.subCategory == "Not sure"
     } == true
+
+/** A confident current pair can be confirmed with Yes, or corrected with No. */
+internal fun CapturedSms.needsCategoryValidation(): Boolean = categoryReview == null &&
+    classification?.status == ClassificationStatus.EXPENDITURE &&
+    classification.category?.let {
+        it.status == CategoryStatus.IDENTIFIED && it.subCategory != null
+    } == true

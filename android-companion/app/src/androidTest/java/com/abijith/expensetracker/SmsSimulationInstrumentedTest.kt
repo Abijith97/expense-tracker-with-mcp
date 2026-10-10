@@ -3,7 +3,7 @@ package com.abijith.expensetracker
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.abijith.expensetracker.ui.theme.FinanceTrackerCompanionTheme
 import org.junit.Assert.*
@@ -14,7 +14,7 @@ import org.junit.runner.RunWith
 /** Simulator UI uses stub callbacks only: no actual SMS, real store, credentials, or paid calls. */
 @RunWith(AndroidJUnit4::class)
 class SmsSimulationInstrumentedTest {
-    @get:Rule val compose = createComposeRule()
+    @get:Rule val compose = createAndroidComposeRule<ComposeTestActivity>()
 
     @Test
     fun pausedBlankOverlongAndRestoringStatesCannotSubmit() {

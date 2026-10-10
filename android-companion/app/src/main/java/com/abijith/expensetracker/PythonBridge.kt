@@ -112,7 +112,7 @@ object PythonBridge {
 
     private fun safeInferenceCode(code: String): String = code.takeIf {
         it in setOf("configuration", "authentication", "access_denied", "request_rejected",
-            "rate_limit_or_quota", "service_unavailable", "timeout", "network", "invalid_input",
+            "rate_limit_or_quota", "service_unavailable", "retry_deferred", "timeout", "network", "invalid_input",
             "invalid_response", "incomplete_response", "refused")
     } ?: "processing"
 

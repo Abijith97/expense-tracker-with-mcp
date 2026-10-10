@@ -1,7 +1,7 @@
 package com.abijith.expensetracker
 
 import androidx.compose.ui.test.hasText
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -15,7 +15,7 @@ import org.junit.runner.RunWith
 /** Synthetic state only: no SMS permission, real history, or cloud credentials. */
 @RunWith(AndroidJUnit4::class)
 class SmsHistoryInstrumentedTest {
-    @get:Rule val compose = createComposeRule()
+    @get:Rule val compose = createAndroidComposeRule<ComposeTestActivity>()
 
     @Test
     fun olderCardsAreAccessibleWithoutDeletingHistoryOrUploading() {

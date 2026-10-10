@@ -5,7 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -21,7 +21,7 @@ import org.junit.runner.RunWith
 /** Consent UI only: stub callbacks cannot enable uploads or touch credentials. */
 @RunWith(AndroidJUnit4::class)
 class CloudControlsInstrumentedTest {
-    @get:Rule val compose = createComposeRule()
+    @get:Rule val compose = createAndroidComposeRule<ComposeTestActivity>()
 
     @Test
     fun costsAndTokensAppearAlongsideTimingsAndUnknownIsNotZero() {

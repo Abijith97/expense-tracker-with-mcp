@@ -51,6 +51,14 @@ OTHER_EXAMPLES = (
     "pre-approved Personal Loan of 69000. Click https://example.invalid/benefit",
 )
 
+# Bill repayments are not fresh spending. Keep sample identifiers sanitized.
+CREDIT_CARD_REPAYMENT_EXAMPLES = (
+    "DEAR HDFCBANK CARDMEMBER, PAYMENT OF Rs.1000.00 RECEIVED TOWARDS YOUR "
+    "CREDIT CARD ENDING WITH 0000 ON 10-10-2026.YOUR AVAILABLE LIMIT IS RS. 5000.00",
+    "Rs.1000 debited from your account towards payment of your credit card bill. Ref DEMO.",
+    "Sent Rs.1000 via UPI to pay the outstanding balance on my credit card. Payment successful.",
+)
+
 # A diverse subset goes in the prompt; remaining examples can be evaluated
 # separately. Similar bank templates are not a broad independent accuracy set.
 PROMPT_EXAMPLES = tuple((EXPENDITURE_EXAMPLES[i], True) for i in (0, 1, 12, 15)) + tuple(
@@ -59,4 +67,4 @@ PROMPT_EXAMPLES = tuple((EXPENDITURE_EXAMPLES[i], True) for i in (0, 1, 12, 15))
     ("Your OTP is 000000 for a proposed card payment of Rs.500. Do not share it.", False),
     ("Rs.500 credited to your account from Example Employer.", False),
     ("Your Rs.500 UPI payment failed. No money was debited.", False),
-)
+) + tuple((text, False) for text in CREDIT_CARD_REPAYMENT_EXAMPLES)

@@ -6,31 +6,31 @@ This is repository-hosted Markdown wiki documentation under `docs/wiki/`, not a 
 
 ## Scope and current verification
 
-Last verified: **October 4, 2026**. The current build is `0.12.0-category-review`. Python tests, debug/release APK builds, and lint passed on Windows with Python 3.11.9. All fifteen Android test classes passed on the Pixel 7a running Android 17 through AndroidJUnitRunner after updating debug app/test APKs without clearing storage. Review forms exist in both variants; the release simulator remains an empty UI/rejecting stub.
+Last verified: **October 10, 2026**. The current build is `0.13.0-expenditure-review`. Python tests, debug/release APK builds, and lint passed on Windows. All seventeen Android test classes passed on the Pixel 7a running Android 17 through AndroidJUnitRunner after updating debug app/test APKs without clearing storage. Review controls exist in both variants; the release simulator remains an empty UI/rejecting stub. Isolated Compose tests use an app-themed `ComposeTestActivity` in the debug source set; it is absent from release builds.
 
 | Check | Last verified result | What it establishes |
 | --- | --- | --- |
-| Python unit suite | 54 tests passed | Python input/output contracts, strict boolean/category parsing, safe token/cost telemetry, shared transport safety, and mocked inference. |
-| Android integration/UI suite | 62 tests passed | Packaged Python, routing, consent/cost UI, encrypted recovery, history, simulator/shared processing, timings, and uncertainty-review forms/persistence work on the phone. Does not verify live SMS delivery, predictions, or learning accuracy. |
+| Python unit suite | 56 tests passed | Python input/output contracts, strict boolean/category parsing, repayment prompt examples, safe telemetry, transport timeout/deferral and mocked inference. |
+| Android integration/UI suite | 80 tests passed | Packaged Python, routing, consent/cost UI, encrypted recovery, history, simulator/shared processing, timings, bounded retries, recording intent and category validation/editing work on the phone. Does not verify live SMS delivery, predictions, or learning accuracy. |
 | Debug application/test and unsigned release APK builds | Passed | Both source-set variants build with embedded Python; the simulator implementation is debug-only. |
 | Android lint | Passed | No lint errors and no remaining unused-resource warnings. Other warnings remain; this is not a claim of zero warnings. |
 | Live category suggestions | Needs a manual synthetic SMS check | Automated checks do not contact OpenAI with a valid key or establish category accuracy. |
 
-**Source version:** `0.12.0-category-review` has 54 Python and 62 Android checks. Tag `v0.11.0` has the preceding simulator build (54/53). Commit `9e52fb4` has the prior personal-category/background build (54/42); `79704f8` has the two-key/category build (41/24); `c55c370` has direct classification (27/14). The retired MCP experiment `22b14ee` had 43/16. Compare totals only against matching source versions.
+**Source version:** `0.13.0-expenditure-review` has 56 Python and 80 Android checks. The preceding `0.12.0-category-review` build has 54/62. Tag `v0.11.0` has the simulator build (54/53). Commit `9e52fb4` has the prior personal-category/background build (54/42); `79704f8` has the two-key/category build (41/24); `c55c370` has direct classification (27/14). The retired MCP experiment `22b14ee` had 43/16. Compare totals only against matching source versions.
 
 There is no configured GitHub Actions workflow. A Git push does not currently execute these tests. Android Studio and Gradle are test runners; GitHub Actions could automate selected checks later.
 
 iOS development and proposed per-feature acceptance tests are tracked in the [iOS guide](../../ios-companion/README.md). No iOS project or tests are implemented or verified yet; the Android/Python counts above are not iOS results.
 
-The unchanged `v0.11.0` tag identifies the previous SMS-simulator milestone (version code 13). The current review build has version code 14. A short [test README](../../android-companion/python-tests/README.md) provides quick-start commands; this guide is the detailed coverage reference. A Git tag is a source checkpoint, not APK distribution or a GitHub Release.
+The unchanged `v0.11.0` tag identifies the previous SMS-simulator milestone (version code 13). The current review build has version code 15. A short [test README](../../android-companion/python-tests/README.md) provides quick-start commands; this guide is the detailed coverage reference. A Git tag is a source checkpoint, not APK distribution or a GitHub Release.
 
 ## What gets tested in the normal flow
 
-For an SMS, Android captures and saves the message, calls embedded Python for a short acknowledgement, and optionally schedules a separate cloud-classification worker. That worker calls `orchestrator.classify_sms` for the boolean check. The bridge supplies a dedicated classification key. Only an Expenditure result with current permission/capture/consent enters `orchestrator.identify_sms_category` for the second hosted call, using its own category key. Kotlin validates each result and updates the same captured-message card. A category failure must preserve the expenditure label.
+For an SMS, Android captures and saves the message, calls embedded Python for a short acknowledgement, and optionally schedules a separate cloud-classification worker. That worker calls `orchestrator.classify_sms` for the boolean check. The bridge supplies a dedicated classification key. Only an Expenditure result with current permission/capture/consent enters `orchestrator.identify_sms_category` for the second hosted call, using its own category key. Kotlin validates each result and updates the same captured-message card. A category failure must preserve the expenditure label. Each stage uses a 60-second socket-operation timeout and at most two retries for transient network, timeout, or server errors. Category retries do not repeat successful classification. Retry tests inject errors, clocks and sleeps; they do not simulate a real carrier outage.
 
 For chat, Kotlin calls the Python orchestrator, which calls `app_help.get_help()` directly. Every valid chat message currently receives capability information; spending queries are not implemented yet.
 
-Separately, `ChatScreen` derives review forms from retained Expenditure cards with Not sure/Not sure. Each empty category/sub-category form shows examples and permits custom labels. Submit calls `SmsStore.confirmCategory` locally with the exact SMS and attempt IDs; it does not call Python/OpenAI, train weights, or insert an expense. Pending forms survive restarts; saved labels are separate from model suggestions. Pause is allowed, stale/duplicate/cleared attempts are rejected, and clear removes annotations with their SMS copies. Unsaved drafts are not retained.
+Separately, SMS cards and `ChatScreen` derive validation controls from retained Expenditure cards: predicted pairs get Yes/No, while Not sure/Not sure or No opens empty fields with examples and custom labels. Submit calls `SmsStore.confirmCategory` locally with the exact SMS and attempt IDs. Saved labels can be edited through `editCategory`, which also checks the observed review timestamp to reject stale editors. A recording switch persists a separate optional inclusion choice, defaulting off. These controls do not call Python/OpenAI, train weights, or insert a ledger expense. Pending forms and submitted choices survive restarts; saved labels remain separate from model suggestions. Pause is allowed, stale/duplicate/cleared attempts are rejected, and clear removes annotations with their SMS copies. Unsaved drafts are not retained.
 
 The debug **Simulate SMS** dialog enters the same shared `SmsProcessor` after reception/part decoding. It creates a labelled local card, calls the packaged Python acknowledgement, and optionally schedules the same cloud worker after charge confirmation. A cloud-off submission explicitly forbids cloud scheduling even if settings change while the local handoff runs. Permission/capture checks still apply. Simulator tests use isolated storage, a wrapper-scoped synthetic permission (not a grant to the real app), and stubbed scheduling/confirmation callbacks. They never send SMS, write the phone inbox, access real credentials, or contact OpenAI with a valid key. Simulation cannot verify Android reception, closed-app delivery, or receiver/delivery timings.
 
@@ -48,10 +48,11 @@ The tests enter these stages independently:
 | Credential restart recovery | Isolated vaults use real Android Keystore and synthetic keys to recover remembered consent/session, forget keys, or fail closed after corruption; no real credentials are accessed. |
 | Performance measurements | Separate benchmarks measure JSON serialization and local handoff stages. |
 | Shared processor and simulator | Real local Python handoff for both sources; isolated persistence/provenance, stale/permission/pause/clear guards, cloud-off entry point, editable samples, input bounds, and cancelled/confirmed charge prompts. |
-| Uncertain-category review | Six isolated-store checks for eligibility, custom labels, persistence, stale guards and separate human/model data; three Compose UI checks with stubbed submission for empty fields, examples, validation, correlated saving and retries. |
+| Category validation, editing and recording intent | Eleven isolated-store checks and six form UI checks cover custom labels, Yes/No, edits/cancellation, persistence, stale editors and separate human/model data. Three switch UI checks cover opt-in/out and failed saving. |
+| Network retries | Seven Android checks cover bounded attempts, backoff, cancellation, permanent errors, stage independence, attempt persistence and unknown total costs after retry. Python checks cover timeout configuration, repayment prompt examples, and deferred retry when a server requests a delay. |
 | Actual SMS delivery and hosted predictions | Manual checks and the explicitly invoked paid evaluation. |
 
-## Python unit tests: 54 checks
+## Python unit tests: 56 checks
 
 All Python unit files are under `android-companion/python-tests/`. They import the same Python source that is packaged in the APK, under `android-companion/app/src/main/python/`.
 
@@ -59,13 +60,13 @@ All Python unit files are under `android-companion/python-tests/`. They import t
 | --- | ---: | --- |
 | `test_orchestrator.py` | 9 | SMS acknowledgement, required fields, malformed JSON, invalid types, nonnegative timestamps, Unicode code-point counts, and a receipt that does not echo the sender/body. |
 | `test_chat.py` | 4 | Correlated capability replies, required fields, invalid types/blank input, generic errors, and no echo of private chat input. |
-| `test_classifier.py` | 14 | Positive/negative few-shot examples, strict boolean schema, genuine booleans rather than truthy strings/numbers, malformed/refused/incomplete model output, input limits, missing credentials, mocked HTTPS settings, blocked redirects, safe HTTP/network errors, direct classifier routing, and rejection of malformed direct-call decisions/timings. |
+| `test_classifier.py` | 16 | Positive/negative few-shot examples, credit-card repayment exclusions, strict boolean schema, genuine booleans rather than truthy strings/numbers, malformed/refused/incomplete model output, input limits, missing credentials, 60-second mocked HTTPS settings, blocked redirects, safe HTTP/network errors, Retry-After deferral, direct routing, and rejection of malformed decisions/timings. |
 | `test_usage.py` | 10 | Cached/cache-write accounting, no reasoning double-counting, long-context threshold, unknown prices/counts, safe telemetry, both real entry points, standard tier, reported costs on failed outputs, and timing without usage after network failure. |
 | `test_category.py` | 17 | Both enums/valid pairs, all 24 sanitized user labels, personal purpose/uncertainty rules, and few-shot examples, uncertainty/untrusted-text instructions, model overrides, strict parser, safe errors/transport settings, missing keys, correlated results, and malformed category/timing rejection. |
 
 Each `test_...` method counts as one test. Methods may use `subTest` to cover several inputs; those variants are not extra methods in the reported total.
 
-The classifier tests exercise all 34 sanitized user-derived SMS examples with **mocked model labels**. Passing them establishes that the code handles the supplied labels correctly. It does not measure a real model's accuracy or prove that all future messages will be classified correctly.
+The classifier tests exercise all 34 original sanitized user-derived SMS examples with **mocked model labels**, plus three sanitized credit-card repayment negatives. The prompt excludes bill repayments while keeping actual card purchases as expenditures. Passing these checks establishes prompt contents and response handling; it does not measure a real model's accuracy or prove that future messages will be classified correctly.
 
 Category tests similarly supply **mocked category/sub-category pairs**, not live predictions. A dedicated check preserves all 24 supplied labels with bank identifiers removed/replaced, and tests validate every disallowed pairing as a failure. These are preference/configuration and contract checks, not a classifier using rules or a semantic accuracy test. Passing them validates code contracts, not that Blinkit, BMTC, or a new merchant will be categorized correctly. Prompt rules require manual/model evaluation to measure semantic behavior.
 
@@ -96,7 +97,7 @@ To run just the classifier tests, from `android-companion`:
 python -m unittest discover -s python-tests -p "test_classifier.py" -v
 ```
 
-Success ends with `Ran 54 tests` and `OK` for the full current suite. A failure includes the test name and failed assertion; `ERROR` usually means an exception or import/setup problem. Read the failure, fix the implementation or incorrect test expectation, and rerun that suite before rerunning everything.
+Success ends with `Ran 56 tests` and `OK` for the full current suite. A failure includes the test name and failed assertion; `ERROR` usually means an exception or import/setup problem. Read the failure, fix the implementation or incorrect test expectation, and rerun that suite before rerunning everything.
 
 To run just category tests:
 
@@ -104,7 +105,7 @@ To run just category tests:
 python -m unittest discover -s python-tests -p "test_category.py" -v
 ```
 
-## Android integration and UI tests: 62 checks
+## Android integration and UI tests: 80 checks
 
 Files are under `android-companion/app/src/androidTest/java/com/abijith/expensetracker/`. The tests run in a separate test APK on a development phone or emulator, using AndroidJUnitRunner and Compose UI testing.
 
@@ -123,8 +124,10 @@ Files are under `android-companion/app/src/androidTest/java/com/abijith/expenset
 | `CategoryInstrumentedTest.kt` | 6 | Python/Kotlin pair hierarchies match, both labels parse, invalid/missing pairs are rejected in the bridge, failed categories preserve Expenditure, routing remains gated, and legacy/current result formats persist. |
 | `SmsProcessorInstrumentedTest.kt` | 7 | Shared processor and actual cloud-off simulator entry point; real packaged local Python, isolated saved source labels, no fabricated reception timings, rejected permissions/duplicates/stale tokens, pause/clear guards, safe handoff failure, input limits, and distinct IDs for identical tests. Scheduling is stubbed or forbidden, never real cloud work. |
 | `SmsSimulationInstrumentedTest.kt` | 4 | Compose simulator UI: paused/blank/overlong/restoring submissions blocked, editable Unicode input, cloud-off callback, cloud charge confirmation/cancel, and synthetic sample buttons. All submit callbacks are stubbed. |
-| `CategoryReviewStoreInstrumentedTest.kt` | 6 | Uncertainty-only forms, custom labels/local saving while paused, restart and old-card compatibility, immutable suggestion/timings, invalid labels, duplicate/stale/cleared forms, separate IDs and retained human review after reclassification. Isolated files only. |
-| `CategoryReviewUiInstrumentedTest.kt` | 3 | Empty fields and examples, both labels required, custom-label submission with exact message/attempt, saved Chat display, and failed save/retry with drafts intact. Stub callbacks only. |
+| `CategoryReviewStoreInstrumentedTest.kt` | 11 | Uncertain/predicted-pair validation, custom labels/local saving while paused, restart and old-card compatibility, immutable suggestion/timings, invalid labels, duplicate/stale/cleared forms, separate IDs, recording choices, version-checked editing, and reclassification resetting inclusion while retaining human review. Isolated files only. |
+| `CategoryReviewUiInstrumentedTest.kt` | 6 | Empty fields/examples, required labels, correlated submission, saved Chat display, failed save/retry, predicted Yes/No, and prefilled editing with cancellation/save. Stub callbacks only. |
+| `RecordingChoiceInstrumentedTest.kt` | 3 | Switch defaults off, persists selection/exclusion through stub callbacks, handles failed saving, and is absent for Other/failed classifications. |
+| `InferenceRetryInstrumentedTest.kt` | 7 | Success without retry, transient recovery and three-request cap, permanent/deferred errors, consent withdrawal, time window/disabled retries, independent category retry, and persisted attempt counts with unknown total cost. Injected clocks/sleeps and mocked calls. |
 
 The storage tests override the store location with a unique synthetic cache directory. They clean only their own test files. The UI consent test does not enable real cloud uploads. Tests do not read the SMS inbox, send SMS, inject SMS broadcasts, or clear the user's saved capture history.
 
@@ -132,13 +135,13 @@ The storage tests override the store location with a unique synthetic cache dire
 
 1. Open `android-companion` in Android Studio and let Gradle sync finish.
 2. Connect a development Pixel or start a compatible emulator.
-3. Open one of the fifteen test classes above.
+3. Open one of the seventeen test classes above.
 4. Click the green run arrow beside the class and choose **Run**.
 5. Inspect the test results and any failed assertion.
 
 The tooling builds/installs the app and test APK and may restart the application. Memory-only mode needs key/consent re-entry; opted-in remembered settings restore automatically. Key tests now use isolated settings instances, ciphertext files, and unique Keystore aliases, so they never disable or remove your real remembered credentials. Updating with the same debug signing key does not require uninstalling or clearing storage.
 
-### Run all fifteen classes from PowerShell
+### Run all seventeen classes from PowerShell
 
 From `android-companion`, with Android Studio's JDK installed:
 
@@ -147,7 +150,7 @@ $env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'
 .\gradlew.bat :app:connectedDebugAndroidTest
 ```
 
-Gradle writes connected-test reports under `app/build/reports/androidTests/connected/`. Through ADB, inspect the runner result (`OK (62 tests)`), not just the shell exit code. The final October 4 device run reported 62 checks in 30.402 seconds; this suite duration is not SMS-processing latency.
+Gradle writes connected-test reports under `app/build/reports/androidTests/connected/`. Through ADB, inspect the runner result (`OK (80 tests)`), not just the shell exit code. The final October 10 device run reported 80 checks in 36.363 seconds; this suite duration is not SMS-processing latency. An earlier run failed at the generic Compose test-host setup with “No compose hierarchies found.” Switching isolated UI tests to the explicit debug-only activity resolved those failures without changing their functional assertions.
 
 Generated `ExampleUnitTest` and `ExampleInstrumentedTest` were removed; they were template examples, not meaningful application coverage.
 
@@ -156,6 +159,8 @@ Generated `ExampleUnitTest` and `ExampleInstrumentedTest` were removed; they wer
 The ten Python usage tests use synthetic provider counts and published-rate arithmetic, not real bills. Android tests verify telemetry crossing the packaged Python bridge, display, persisted round-tripping, and totals without erasing timings or valid predictions. Missing telemetry is never labelled free. Existing three bottleneck/performance tests remain unchanged.
 
 The current estimator supports only the exact default model and standard tier, with dated rates. See the [cost and timing design](../../android-companion/README.md#per-message-calculated-cost-and-bottleneck-timings) for cache-write accounting, unsupported pricing, failures, retry/history limitations and manual checks. A live model call and external billing reconciliation remain manual, explicitly chargeable steps; no Admin key belongs in the APK.
+
+Automatic retries retain per-stage request counts. Usage describes only the final response, so the combined analysis estimate is unavailable after any retry; timed-out requests may still be charged. The retry tests check that partial usage is not presented as a complete bill.
 
 ## Build and lint checks
 
@@ -203,9 +208,9 @@ Run `SmsPerformanceInstrumentedTest.kt` and filter Android Studio Logcat by `Sms
 | JSON encoding | Production Kotlin serializer only. | Python startup, inference, or SMS delivery time. |
 | Receiver entry to JSON ready | Setup, executor wait, message preparation/save, bridge wait, and encoding. | Delivery before receiver entry or later model processing. |
 | Complete local handoff | Shared-lock wait, encoding, runtime setup, Python receipt call, and validation. | Hosted classification latency. |
-| Total analysis processing | Worker-side expenditure call and, if applicable, the category call and between-stage checks. | WorkManager scheduling/network-constraint wait, final persistence, or UI rendering. |
-| Category processing | The category Kotlin/Python call, HTTP round trip, and enum parsing. | Expenditure stage, scheduling wait, persistence, or UI rendering. |
-| Expenditure / category API round trip and validation | HTTP/network/model processing, response reading, and boolean/enum parsing. | Pure model compute time. |
+| Total analysis processing | All worker-side expenditure/category attempts, retry backoff, and between-stage checks. | WorkManager scheduling/network-constraint wait, final persistence, or UI rendering. |
+| Category processing | All category attempts, backoff, bridge/HTTP round trips, and enum parsing. | Expenditure stage, scheduling wait, persistence, or UI rendering. |
+| Expenditure / category API round trip and validation | Final request's HTTP/network/model processing, response reading, and parsing. | Pure model compute time or duration of earlier attempts. |
 
 Some values are totals containing other stages: do not add all displayed durations together. Use repeat measurements on the same device/build. Older saved messages have no retroactive receiver timings. For real captures, filter Logcat by `SmsPerformance`; receiver timing logs omit sender/body.
 
@@ -236,6 +241,8 @@ Use ordinary synthetic SMS messages without personal details or verification cod
 5. Deliberately enable cloud with two distinct private keys and explicit upload consent. Send synthetic BMTC/Blinkit/food-delivery payment examples, a personal-name transfer, and an advertising example. Expect utilities/transport, utilities/groceries and fun/food, Not sure for both fields when the purpose is unknown, and category skipped for Other. Inspect separate timings or safe failures. An Expenditure result must remain Expenditure if category inference fails. These expectations need manual verification and are not guarantees.
 6. Confirm that enabling cloud alone does not replay old history; use the per-card upload/reclassify button only if you intentionally want to upload that saved body.
 7. For a closed-app/reboot check, optionally select Remember keys on this device before enabling. Follow the [background checklist](../../android-companion/README.md#manual-closed-app-check). Disable cloud and forget keys after the demo unless you deliberately want ongoing uploads. An already-sent API request cannot be recalled.
+8. On an existing Expenditure card, select and exclude recording, then reopen the app to check persistence. Confirm a predicted category with Yes, or use No/Not sure to enter custom labels. Edit the saved labels, check Cancel edit and Save changes, and verify the original suggestion remains visible. These actions are local and require no API credits.
+9. For an intentional paid prompt check, use a synthetic credit-card bill-payment confirmation and an actual card-purchase example. Expect Other for the repayment and Expenditure for the purchase. Existing saved predictions are not automatically rerun when the prompt changes.
 
 Android 17 may protect OTP SMS; RCS, WhatsApp, and email are not ordinary SMS and are outside the current capture implementation. Test ordinary SMS for reception checks.
 
@@ -243,16 +250,17 @@ Android 17 may protect OTP SMS; RCS, WhatsApp, and email are not ordinary SMS an
 
 Not fully automated today: actual SMS delivery, permission dialogs, the complete receiver-to-WorkManager-to-hosted-model path, scheduling delay, real model accuracy, process/background behavior under all Android restrictions, or live classification through the current direct-call route. Recovery tests reconstruct isolated settings/storage instances rather than killing a real process. Real Keystore encryption is exercised, but actual SMS/worker-triggered cold process startup and reboot scheduling require manual verification.
 
-Uncertainty review is implemented and tested, but correction of confident suggestions, automatic feedback reuse, extraction, expense-ledger operations, spending queries, weekly reports, and training remain unimplemented. An Expenditure label describes payment text, not verified ownership; a friend copying a bank alert is not distinguished from the user's own alert.
+Category confirmation/correction/editing and recording intent are implemented. Automatic feedback reuse, extraction, expense-ledger operations, spending queries, weekly reports, and training remain unimplemented. An Expenditure label describes payment text, not verified ownership; a friend copying a bank alert is not distinguished from the user's own alert.
 
 | Symptom | Check |
 | --- | --- |
-| Unexpected test counts | Current source defines 54 Python and 62 Android checks; tag v0.11.0 has 54/53. Check the source-version note before comparing older milestones. |
+| Unexpected test counts | Current source defines 56 Python and 80 Android checks; tag v0.11.0 has 54/53. Check the source-version note before comparing older milestones. |
 | Python not found / activation fails | Select a working Python 3.11 environment; use its executable directly if activation is blocked. |
 | No connected device | Enable USB debugging, approve the connection, and select the Pixel/emulator in Android Studio. |
 | Android build or Python bytecode compilation fails | Check the configured JDK, SDK components, Gradle sync, and build-time Python 3.11 matching the APK runtime. |
 | Classification waits | Check internet, Android scheduling, capture permission, and the current cloud session. Unit tests do not measure queue wait. |
 | Classification or category fails | Read the separate safe error; check key, API billing/quota/model access, or connectivity. Category failures preserve Expenditure and do not fabricate Other/Not sure. Manual reclassification repeats both stages for expenditures and may incur charges. |
+| Compose test reports no hierarchies | Rebuild and install both matching debug app/test APKs. Isolated UI tests require the debug-only `ComposeTestActivity`; the chat integration test uses `MainActivity`. Do not clear real app data to repair a test-host problem. |
 | No captured SMS | Check permission/capture, reopen after force-stop, and make sure it was ordinary SMS rather than RCS. |
 
 Before a demo, run the Python suite, build/lint, device suite, and then the manual checks. Keep live evaluation optional and intentional. See the [main project README](../../README.md) and [Android setup guide](../../android-companion/README.md) for architecture and setup.

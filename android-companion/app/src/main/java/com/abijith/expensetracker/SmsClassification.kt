@@ -14,7 +14,9 @@ data class SmsClassification(
     val errorCode: String? = null,
     val category: SmsCategory? = null,
     val usage: LlmUsage? = null,
+    val networkAttempts: Int = 1,
 ) {
+    init { require(networkAttempts in 0..3) }
     fun toJson(): JSONObject = JSONObject().put("status", status.name).put("attempt_id", attemptId).also {
         model?.let { value -> it.put("model", value) }
         elapsedMs?.let { value -> it.put("elapsed_ms", value) }
@@ -22,6 +24,7 @@ data class SmsClassification(
         errorCode?.let { value -> it.put("error_code", value) }
         category?.let { value -> it.put("category", value.toJson()) }
         usage?.let { value -> it.put("usage", value.toJson()) }
+        it.put("network_attempts", networkAttempts)
     }
 
     companion object {
@@ -38,6 +41,7 @@ data class SmsClassification(
                 // Older saved classifications have no category; do not replay them.
                 category = json.optJSONObject("category")?.let(SmsCategory::fromJson),
                 usage = LlmUsage.fromJson(json.optJSONObject("usage")),
+                networkAttempts = json.optInt("network_attempts", 1),
             )
         }
     }
@@ -54,5 +58,6 @@ fun classificationFailureMessage(code: String?): String = when (code) {
     "invalid_input" -> "Message is empty or too long for this POC."
     "invalid_response", "incomplete_response" -> "No valid classification was returned. Retry when ready."
     "service_unavailable" -> "OpenAI is temporarily unavailable."
+    "retry_deferred" -> "The server requested a delay. Wait before retrying manually."
     else -> "Classification did not complete. You can retry manually."
 }

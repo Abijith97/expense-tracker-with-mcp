@@ -15,7 +15,7 @@ from unittest.mock import ANY, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app/src/main/python"))
 import expenditure_classifier as classifier
 import llm_api
-from classifier_examples import EXPENDITURE_EXAMPLES, OTHER_EXAMPLES, PROMPT_EXAMPLES
+from classifier_examples import EXPENDITURE_EXAMPLES, OTHER_EXAMPLES, PROMPT_EXAMPLES, CREDIT_CARD_REPAYMENT_EXAMPLES
 from orchestrator import classify_sms
 
 
@@ -105,13 +105,13 @@ class ExpenditureClassifierTests(unittest.TestCase):
             request = factory.return_value.open.call_args.args[0]
             self.assertEqual(request.full_url, "https://api.openai.com/v1/responses")
             self.assertEqual(request.get_header("Authorization"), "Bearer DEMO-KEY")
-            self.assertEqual(factory.return_value.open.call_args.kwargs["timeout"], 20)
+            self.assertEqual(factory.return_value.open.call_args.kwargs["timeout"], 60)
             self.assertNotIn("DEMO-KEY", request.data.decode())
 
     def test_http_and_network_errors_are_safe_without_retries(self):
         cases = [(urllib.error.HTTPError("demo", code, "PRIVATE-DETAIL", {}, None), expected)
                  for code, expected in ((401, "authentication"), (403, "access_denied"),
-                     (429, "rate_limit_or_quota"), (500, "service_unavailable"), (400, "request_rejected"))]
+                     (408, "timeout"), (429, "rate_limit_or_quota"), (500, "service_unavailable"), (400, "request_rejected"))]
         cases.extend([(socket.timeout("PRIVATE-DETAIL"), "timeout"),
             (urllib.error.URLError("PRIVATE-DETAIL"), "network"),
             (urllib.error.URLError(socket.timeout()), "timeout")])
@@ -122,6 +122,28 @@ class ExpenditureClassifierTests(unittest.TestCase):
                     classifier.classify_expenditure("DEMO-BODY", "DEMO-KEY")
                 self.assertEqual(str(caught.exception), expected)
                 factory.return_value.open.assert_called_once()
+
+    def test_credit_card_repayments_are_negative_prompt_examples_not_card_purchases(self):
+        prompt = classifier.build_request("Synthetic credit card purchase")
+        self.assertIn("Credit-card bill payments/repayments are false", prompt["instructions"])
+        self.assertIn("Actual purchases made USING a credit card", prompt["instructions"])
+        for message in CREDIT_CARD_REPAYMENT_EXAMPLES:
+            self.assertIn((message, False), PROMPT_EXAMPLES)
+            self.assertNotIn("2858", message)
+            with patch.object(llm_api.urllib.request, "build_opener") as factory:
+                factory.return_value.open.return_value.__enter__.return_value.read.return_value = json.dumps(response_for(False)).encode()
+                result = json.loads(classify_sms(self.payload(message), "DEMO-KEY"))
+                self.assertIs(result["is_expenditure"], False)
+        # Mocked labels verify routing/prompt intent, not real-model accuracy.
+
+    def test_server_retry_after_hint_defers_automatic_android_retry(self):
+        with patch.object(llm_api.urllib.request, "build_opener") as factory:
+            factory.return_value.open.side_effect = urllib.error.HTTPError(
+                "demo", 503, "PRIVATE", {"Retry-After": "60"}, None)
+            with self.assertRaises(classifier.ClassificationError) as caught:
+                classifier.classify_expenditure("DEMO-BODY", "DEMO-KEY")
+            self.assertEqual(caught.exception.code, "retry_deferred")
+            factory.return_value.open.assert_called_once()
 
     def test_malformed_or_oversized_http_response_is_safe(self):
         for raw in (b"PRIVATE-BROKEN-JSON", b"x" * (llm_api.MAX_RESPONSE_BYTES + 1)):

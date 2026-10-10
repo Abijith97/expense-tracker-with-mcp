@@ -127,6 +127,9 @@ fun SmsClassificationDetails(classification: SmsClassification?, canClassify: Bo
     }
     Text("Classification: $label", style = MaterialTheme.typography.titleSmall)
     Text("Classification runs through the Python orchestrator.", style = MaterialTheme.typography.bodySmall)
+    if (classification != null && classification.status !in setOf(ClassificationStatus.WAITING, ClassificationStatus.RUNNING)) {
+        Text("Classification request attempts: ${classification.networkAttempts}")
+    }
     classification?.elapsedMs?.let {
         Text("Total analysis processing: ${String.format(Locale.US, "%.3f", it)} ms")
     }
@@ -139,6 +142,7 @@ fun SmsClassificationDetails(classification: SmsClassification?, canClassify: Bo
     }
     if (classification?.status == ClassificationStatus.EXPENDITURE) {
         val category = classification.category
+        category?.let { Text("Category request attempts: ${it.networkAttempts}") }
         val categoryLabel = when (category?.status) {
             null -> "Not identified (older result)"
             CategoryStatus.IDENTIFIED -> if (category.name == "Not sure") "Not sure - needs review"
@@ -172,6 +176,11 @@ fun SmsClassificationDetails(classification: SmsClassification?, canClassify: Bo
         Text("Calculated from reported tokens and supported rates, not a final bill. " +
             "Latest attempt only; earlier retries and unknown charges are not included. " +
             "Existing timing measurements remain separate.", style = MaterialTheme.typography.bodySmall)
+        if (classification.networkAttempts > 1 || (classification.category?.networkAttempts ?: 0) > 1) {
+            Text("Automatic retries occurred. Stage tokens/costs describe the final response only; " +
+                "total cost is unavailable because earlier requests may also be billed.",
+                style = MaterialTheme.typography.bodySmall)
+        }
     }
     if (canClassify && classification?.status !in setOf(ClassificationStatus.WAITING, ClassificationStatus.RUNNING)) {
         OutlinedButton(onClick = onClassify) {
