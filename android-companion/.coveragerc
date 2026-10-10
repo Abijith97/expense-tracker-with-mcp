@@ -1,0 +1,19 @@
+[run]
+branch = True
+source = app/src/main/python
+relative_files = True
+data_file = build/python-coverage/.coverage
+
+[report]
+show_missing = True
+skip_empty = True
+fail_under = 85
+
+[html]
+directory = build/python-coverage/html
+
+[xml]
+output = build/python-coverage/coverage.xml
+
+[json]
+output = build/python-coverage/coverage.json

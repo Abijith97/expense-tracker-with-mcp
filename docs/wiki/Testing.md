@@ -18,11 +18,75 @@ Last verified: **October 10, 2026**. The current build is `0.13.0-expenditure-re
 
 **Source version:** `0.13.0-expenditure-review` has 56 Python and 80 Android checks. The preceding `0.12.0-category-review` build has 54/62. Tag `v0.11.0` has the simulator build (54/53). Commit `9e52fb4` has the prior personal-category/background build (54/42); `79704f8` has the two-key/category build (41/24); `c55c370` has direct classification (27/14). The retired MCP experiment `22b14ee` had 43/16. Compare totals only against matching source versions.
 
-There is no configured GitHub Actions workflow. A Git push does not currently execute these tests. Android Studio and Gradle are test runners; GitHub Actions could automate selected checks later.
+GitHub Actions runs the suites through [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) on pushes to `main`, pull requests targeting `main`, and manual runs. Android Studio/Gradle and Python unittest remain the test runners; Actions automates their execution. See [CI and coverage](#continuous-integration-and-coverage).
 
 iOS development and proposed per-feature acceptance tests are tracked in the [iOS guide](../../ios-companion/README.md). No iOS project or tests are implemented or verified yet; the Android/Python counts above are not iOS results.
 
 The unchanged `v0.11.0` tag identifies the previous SMS-simulator milestone (version code 13). The current review build has version code 15. A short [test README](../../android-companion/python-tests/README.md) provides quick-start commands; this guide is the detailed coverage reference. A Git tag is a source checkpoint, not APK distribution or a GitHub Release.
+
+## Continuous integration and coverage
+
+The workflow has two stages:
+
+1. **Python:** run the existing offline unittest suite with Python 3.11 on both Windows and Linux. `coverage.py` measures the eight production Python modules, including branches. Generate HTML/XML/JSON reports and fail the job below 85% combined coverage.
+2. **Android:** after both Python jobs pass, build debug/test/unsigned-release APKs and run lint on Linux. Start a fresh Android 15 (API 35) x86_64 emulator and run all instrumented JUnit/Compose tests with JaCoCo coverage. The app still compiles/targets API 37; the emulator is one supported runtime, not a replacement for the Pixel's Android 17 checks. Rebuild the debug APK without instrumentation and deliver it as an artifact after all checks pass.
+
+No OpenAI keys or real messages are supplied to CI. The optional paid `evaluate_classifier.py` script is excluded. The GitHub runner provides its own emulator; your phone/computer need not be connected or running. Actions usage/artifact storage counts toward the repository owner's GitHub allowance.
+
+| Part | Runner/framework | Coverage tool | What coverage includes |
+| --- | --- | --- | --- |
+| Python logic | Standard-library `unittest` | `coverage.py` 7.14.3 | Production Python statements and branches exercised by the host tests. |
+| Android integration/UI | JUnit 4, AndroidJUnitRunner, Compose UI testing, Gradle | JaCoCo 0.8.14 through AGP | Kotlin/Java app code exercised by instrumented tests. Includes app/debug source; does not instrument embedded Python or native libraries. |
+| Automation/delivery | GitHub Actions | Uploaded reports | Runs tests/builds and provides a debug APK after successful checks. |
+
+GoogleTest is a C++ test framework and does not fit these Kotlin/Python suites. Existing tests need no framework migration. These tools also run locally from Android Studio or PowerShell. References: [Android coverage tasks](https://developer.android.com/studio/test/coverage-report), [Coverage.py](https://coverage.readthedocs.io/en/7.14.3/), [emulator runner](https://github.com/ReactiveCircus/android-emulator-runner), and [GoogleTest](https://github.com/google/googletest).
+
+**Initial local Python baseline:** 56 tests passed; 99% combined statement/branch coverage (268 statements, 78 branches; two missed statements and two partial branches). This measures exercised code, not prediction accuracy. Kotlin has its own report and denominator; do not average the two percentages. Android coverage is reported without a minimum-percentage gate. Tests/lint/report generation must still pass. Emulator timings and instrumented coverage runs are not device performance benchmarks.
+
+### Find results and download the APK
+
+Open the repository's **Actions** tab, select **Tests, coverage and demo APK**, then open a run. Job logs contain failed assertions and Python coverage totals. Its **Artifacts** list contains:
+
+- `python-coverage-ubuntu-24.04` and `python-coverage-windows-latest`: open `html/index.html`; XML/JSON support machine processing.
+- `android-test-coverage-and-lint`: Android test results, lint and JaCoCo coverage. Open the coverage `index.html` under `androidTest/debug/connected/`.
+- `expense-tracker-demo-apk`: `app-debug.apk`, available after a successful push/manual run; no APK delivery from pull-request runs.
+
+Artifacts are retained for 14 days. Reports are uploaded on failure when available; a failed test/build cannot produce a successful demo artifact. Coverage reports are normally generated only after their relevant tests pass. Download and extract the artifact before opening HTML. For a manual rerun, use **Run workflow** in Actions.
+
+Delivery currently means a downloadable debug APK. There is no Play Store deployment or automatic phone installation. A GitHub runner generates its own debug signing key; its APK cannot update an existing locally signed install. Continue local builds for updating a phone while preserving its data. Store signing/distribution credentials are not needed for this workflow.
+
+### Run Python coverage locally on Windows
+
+From the repository root:
+
+```powershell
+cd .\android-companion
+..\.venv\Scripts\python.exe -m pip install -r python-tests\requirements-dev.txt
+..\.venv\Scripts\python.exe -m coverage run -m unittest discover -s python-tests -p "test_*.py" -v
+..\.venv\Scripts\python.exe -m coverage html --fail-under=0
+..\.venv\Scripts\python.exe -m coverage xml --fail-under=0
+..\.venv\Scripts\python.exe -m coverage json --fail-under=0
+..\.venv\Scripts\python.exe -m coverage report
+```
+
+Configuration is in `android-companion/.coveragerc`. Reports go under `build/python-coverage/`, which is ignored by Git. `requirements-dev.txt` installs test tooling only, not dependencies bundled in the APK. Ordinary unittest runs still require only the standard library.
+
+### Run Android coverage locally
+
+Use a development emulator or phone. From `android-companion`:
+
+```powershell
+$env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'
+.\gradlew.bat -Pcoverage=true :app:createDebugAndroidTestCoverageReport --console=plain
+```
+
+That task runs `connectedDebugAndroidTest` and generates the report under `app/build/reports/coverage/androidTest/debug/connected/`. `-Pcoverage=true` enables instrumentation only for the debug build. To restore a normal demo APK and its timings, build again without that flag:
+
+```powershell
+.\gradlew.bat :app:assembleDebug --console=plain
+```
+
+Normal builds leave coverage disabled; release builds are unaffected. All CI actions are pinned to explicit revisions, and the workflow has read-only repository permissions. New pushes cancel older runs for the same branch. These checks do not configure branch protection or guarantee that a failing PR cannot be merged.
 
 ## What gets tested in the normal flow
 

@@ -1,0 +1,2 @@
+# Test tooling only: not packaged in the APK.
+coverage==7.14.3

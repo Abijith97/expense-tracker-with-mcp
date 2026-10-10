@@ -26,6 +26,11 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Opt in for CI/coverage runs; ordinary demo APKs keep normal timings.
+            enableAndroidTestCoverage = providers.gradleProperty("coverage")
+                .map(String::toBoolean).getOrElse(false)
+        }
         release {
             optimization {
                 enable = false
@@ -38,6 +43,9 @@ android {
     }
     buildFeatures {
         compose = true
+    }
+    testCoverage {
+        jacocoVersion = "0.8.14"
     }
 }
 

@@ -333,7 +333,7 @@ $env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'
 .\gradlew.bat :app:connectedDebugAndroidTest
 ```
 
-Use a development device/emulator: Android test tooling installs development APKs and may restart the app. These tests cover the bridges, basic chat/consent controls, and isolated classification-store recovery. Actual SMS delivery, permission dialogs, end-to-end WorkManager scheduling, cloud inference, capture controls, and usability still need manual checks. Android Studio's generated sample tests have been removed; only tests of the actual implementation remain. GitHub Actions is not configured yet; these suites run locally.
+Use a development device/emulator: Android test tooling installs development APKs and may restart the app. These tests cover the bridges, basic chat/consent controls, and isolated classification-store recovery. Actual SMS delivery, permission dialogs, end-to-end WorkManager scheduling, cloud inference, capture controls, and usability still need manual checks. Android Studio's generated sample tests have been removed; only tests of the actual implementation remain. [GitHub Actions](../.github/workflows/ci.yml) also runs Python tests on Windows/Linux and Android tests in an emulator, collects coverage, runs build/lint checks and provides a tested debug APK. See [CI, report downloads and local coverage commands](../docs/wiki/Testing.md#continuous-integration-and-coverage).
 
 ## SMS bottleneck measurements
 

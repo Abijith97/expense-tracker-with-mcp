@@ -6,6 +6,8 @@ Verified on October 10, 2026: **56 Python tests and 80 Android checks passed**. 
 
 ## Run the offline Python suite
 
+GitHub Actions also runs these tests on Windows/Linux and the Android checks in an emulator on pushes/PRs/manual runs. Python coverage has an 85% minimum; Android JaCoCo coverage is reported separately. The initial local Python result is 99% combined statement/branch coverage. See [CI, artifacts and local coverage commands](../../docs/wiki/Testing.md#continuous-integration-and-coverage).
+
 From the repository root, using the existing virtual environment:
 
 ```powershell

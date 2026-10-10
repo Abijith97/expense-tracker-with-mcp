@@ -19,6 +19,8 @@ Its current capabilities are:
 
 The app uses **Kotlin/Jetpack Compose for Android and embedded Python for orchestration and OpenAI requests**. Verification on October 10, 2026: **56 Python tests and 80 Android tests passed**, along with APK builds and lint. Automated tests use mocked API responses; these results do not measure live model accuracy.
 
+[GitHub Actions runs tests, coverage and demo APK builds](docs/wiki/Testing.md#continuous-integration-and-coverage).
+
 ## Earlier WhatsApp POC
 
 The [v0.1.0 release](https://github.com/Abijith97/expense-tracker-with-mcp/releases/tag/v0.1.0) preserves the earlier WhatsApp/Twilio/FastAPI/Ollama/MCP solution. The unused root-level backend Python files and its `requirements.txt` have been removed from the current source tree. The active implementation and tests are under `android-companion/`; use Android Studio to run the app, not a laptop Python server or ngrok.
