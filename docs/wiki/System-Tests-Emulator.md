@@ -23,10 +23,10 @@ The recording switch saves an inclusion choice only. These tests do not claim a 
 - [Instrumented system tests](../../android-companion/app/src/androidTest/java/com/abijith/expensetracker/SmsSystemInstrumentedTest.kt): JUnit 4 / Compose tests using the real Activity.
 - [HTTP fake](../../android-companion/app/src/androidTest/assets/system_test_transport.py): asset in the **test APK only**, absent from debug/release application APKs. Patches `urllib.request.build_opener` below the production transport and restores it after every test.
 - [Host emulator driver](../../android-companion/ci/run_android_system_tests.py): watches readiness markers containing a unique run token, then invokes `adb emu sms send` with a fixed synthetic message. Never injects until the HTTP fake is ready.
-- [Harness unit tests](../../android-companion/python-tests/test_system_test_harness.py): eight offline checks for scenarios, real Python response/error contracts, patch restoration, stale markers and physical-device/multiple-device rejection.
+- [Harness unit tests](../../android-companion/python-tests/test_system_test_harness.py): nine offline checks for scenarios, real Python response/error contracts, patch restoration, stale markers, fresh-emulator reset and physical-device/multiple-device rejection.
 - [Workflow](../../.github/workflows/ci.yml): runs the full Android suite through the host driver with JaCoCo; uploads `sms-injection.json` alongside coverage, lint and JUnit results. Missing scenarios, injection errors or test failures fail CI and block successful APK delivery.
 
-Expected totals are **64 Python tests** and **87 Android tests** (previous 56/80 plus 8/7). A normal instrumented run without the driver skips the seven new system tests; the existing 80 still run. Test totals are not a claim that a CI run has passed—check the matching Actions run.
+Expected totals are **65 Python tests** and **87 Android tests** (previous 56/80 plus 9/7). A normal instrumented run without the driver skips the seven new system tests; the existing 80 still run. Test totals are not a claim that a CI run has passed—check the matching Actions run.
 
 ## Run locally
 

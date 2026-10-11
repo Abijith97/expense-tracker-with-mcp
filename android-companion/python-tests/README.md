@@ -15,7 +15,7 @@ cd .\android-companion
 ..\.venv\Scripts\python.exe -m unittest discover -s python-tests -p "test_*.py" -v
 ```
 
-Expected result: `Ran 64 tests` and `OK` (56 application checks plus 8 system-test harness checks). Tests use synthetic inputs and mocked API responses; no phone or OpenAI key is required. They do not establish live model accuracy.
+Expected result: `Ran 65 tests` and `OK` (56 application checks plus 9 system-test harness checks). Tests use synthetic inputs and mocked API responses; no phone or OpenAI key is required. They do not establish live model accuracy.
 
 ## Run the Android checks
 

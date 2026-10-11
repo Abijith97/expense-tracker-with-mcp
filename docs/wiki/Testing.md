@@ -28,7 +28,7 @@ The unchanged `v0.11.0` tag identifies the previous SMS-simulator milestone (ver
 
 ## Continuous integration and coverage
 
-The full CI emulator suite now also includes [seven SMS system tests](System-Tests-Emulator.md), plus eight offline harness checks. These cover the real receiver/worker/Python/UI journey with only HTTP replaced. Historical verified totals below remain the prior baseline; use the matching Actions run for the new suite's result.
+The full CI emulator suite now also includes [seven SMS system tests](System-Tests-Emulator.md), plus nine offline harness checks. These cover the real receiver/worker/Python/UI journey with only HTTP replaced. Historical verified totals below remain the prior baseline; use the matching Actions run for the new suite's result.
 
 The workflow has two stages:
 

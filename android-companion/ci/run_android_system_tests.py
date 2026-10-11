@@ -56,6 +56,15 @@ def require_only_device(serial):
         raise RuntimeError("Disconnect other devices; only the disposable emulator may be connected")
 
 
+def reset_installed_app(serial):
+    # `pm path` exits 1 on a fresh emulator. Listing is successful even when the
+    # app is absent; exact matching avoids resetting a similarly named package.
+    packages = adb(serial, "shell", "pm", "list", "packages", "--user", "0", APP_ID).splitlines()
+    if "package:" + APP_ID in packages:
+        if adb(serial, "shell", "pm", "clear", APP_ID) != "Success":
+            raise RuntimeError("Could not reset test app")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--serial", required=True)
@@ -74,9 +83,7 @@ def main():
     errors = []
     injected = set()
     # Clear only this POC's data on a validated disposable emulator, if installed.
-    if adb(args.serial, "shell", "pm", "path", APP_ID).startswith("package:"):
-        if adb(args.serial, "shell", "pm", "clear", APP_ID) != "Success":
-            raise RuntimeError("Could not reset test app")
+    reset_installed_app(args.serial)
     logcat = subprocess.Popen(["adb", "-s", args.serial, "logcat", "-v", "raw", "-T", "1",
                               "SmsSystemTest:I", "*:S"], stdout=subprocess.PIPE,
                              stderr=subprocess.STDOUT, text=True)

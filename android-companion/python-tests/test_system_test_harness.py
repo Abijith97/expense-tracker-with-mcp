@@ -69,6 +69,18 @@ class SystemTestHarnessTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             driver.sms_body("unknown")
 
+    def test_reset_handles_fresh_emulator_and_only_clears_exact_installed_package(self):
+        for packages in ("", "package:" + driver.APP_ID + ".test"):
+            with patch.object(driver, "adb", return_value=packages) as adb:
+                driver.reset_installed_app("emulator-5554")
+                self.assertEqual(adb.call_count, 1)
+        with patch.object(driver, "adb", side_effect=["package:" + driver.APP_ID, "Success"]) as adb:
+            driver.reset_installed_app("emulator-5554")
+            adb.assert_called_with("emulator-5554", "shell", "pm", "clear", driver.APP_ID)
+        with patch.object(driver, "adb", side_effect=["package:" + driver.APP_ID, "Failed"]):
+            with self.assertRaises(RuntimeError):
+                driver.reset_installed_app("emulator-5554")
+
     def test_real_pipeline_uses_fake_http_and_correct_keys_for_happy_and_uncertain(self):
         for scenario in ("happy", "uncertain"):
             with self.subTest(scenario=scenario):
