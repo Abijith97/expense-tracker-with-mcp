@@ -2,9 +2,9 @@
 
 This guide explains the POC's test suites, their code locations, how to run them on Windows, and what the results mean. Tests are developer-run checks; they do not run automatically when an SMS arrives.
 
-This is repository-hosted Markdown wiki documentation under `docs/wiki/`, not a page in GitHub's separate Wiki tab. Keeping it here preserves repository privacy and versions it alongside the code.
+This guide is versioned under `docs/wiki/`, with a copy in the [GitHub Wiki](https://github.com/Abijith97/expense-tracker-with-mcp/wiki/Testing). Keeping the source here versions it alongside the code; repository privacy is unchanged.
 
-For the payment-to-card walkthrough, see [Persona-based testing: BMTC payment of Rs.23](Persona-BMTC-Expenditure.md). The [testing wiki index](Home.md) links separate component pages with method purposes, existing test evidence and proposed missing cases. These are documented test contracts, not newly implemented executable tests. As checked on October 11, the Wiki setting is enabled but the separate Wiki Git repository remains inaccessible; the pages are published in this repository's `docs/wiki` section instead.
+For the payment-to-card walkthrough, see [Persona-based testing: BMTC payment of Rs.23](Persona-BMTC-Expenditure.md). The [testing wiki index](Home.md) links separate component pages with method purposes, existing test evidence and proposed missing cases. These are documented test contracts, not newly implemented executable tests. The separate Wiki Git repository became accessible on October 11 after the initial Home page was created.
 
 ## Scope and current verification
 

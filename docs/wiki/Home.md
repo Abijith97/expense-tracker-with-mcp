@@ -2,7 +2,7 @@
 
 Start with the [BMTC persona](Persona-BMTC-Expenditure.md), then follow the component pages to understand each method's purpose and test contract. [Testing.md](Testing.md) explains runners, commands, CI, reports and the full suite list.
 
-These are versioned Markdown wiki pages in the private repository. The GitHub Wiki setting is enabled, but its separate Git repository was inaccessible over SSH and authenticated HTTPS on October 11, 2026. These pages have **not** been published to the separate Wiki tab. No repository visibility/access changes were made. Creating a first Wiki Home page may make that repository available; this is not yet verified.
+These are versioned Markdown pages in the private repository, with copies in the [GitHub Wiki](https://github.com/Abijith97/expense-tracker-with-mcp/wiki). Its separate Git repository became accessible on October 11, 2026 after the initial Home page was created. Repository privacy and access settings were not changed. Wiki copies use Wiki-page links and absolute source-code links; this folder keeps repository-relative links.
 
 ## Read the evidence labels
 
