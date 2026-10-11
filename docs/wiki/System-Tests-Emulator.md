@@ -1,5 +1,9 @@
 # Emulator SMS system tests
 
+## Verified CI result
+
+[Run 38162970973](https://github.com/Abijith97/expense-tracker-with-mcp/actions/runs/38162970973) passed for source `bb24dba`: **65 Python tests on each of Windows/Linux and 87 Android tests on API 35**. All seven system cases ran with zero failures, errors or skips. `sms-injection.json` confirms every expected scenario was injected, with no harness errors. Android JaCoCo reports **91.55% line / 72.51% branch** coverage; host Python remains **99% combined statement/branch**. Builds and lint passed; the normal debug APK artifact was delivered. The run finished October 11 UTC (October 12 IST).
+
 These executable tests join the previously separate components: emulated SMS delivery → `SmsReceiver` → `SmsProcessor` → persisted capture → packaged Python acknowledgement → real WorkManager job → real Python prompts/transport/parsers → stored classification → real `MainActivity` UI.
 
 Only the external HTTP boundary is replaced. The Python fake validates the actual request URL, dedicated synthetic key, strict schema, few-shot inputs and timeout, then supplies a response or error. It does not stub the receiver, worker, bridge, orchestrator or UI callbacks. No real API keys, paid requests or private SMS are used. This verifies response handling, not model prediction accuracy.

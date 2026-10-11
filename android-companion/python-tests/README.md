@@ -2,6 +2,8 @@
 
 The full [testing guide](../../docs/wiki/Testing.md) lists test locations, coverage, Windows commands, timing measurements, and manual checks for both Python and Android.
 
+Latest [CI run 38162970973](https://github.com/Abijith97/expense-tracker-with-mcp/actions/runs/38162970973) passed on source `bb24dba`: **65 Python checks per platform and 87 Android checks**, including all seven emulator SMS system cases with none skipped. Android coverage is 91.55% line / 72.51% branch; Python is 99% combined coverage. No real SMS/private keys or paid inference were used.
+
 Verified on October 10, 2026: **56 Python tests and 80 Android checks passed**. Debug app/test APK builds, unsigned release build, and Android lint passed. The debug app was installed on the Pixel 7a running Android 17 without clearing history or remembered keys. These are local runs, not GitHub Actions. Tag `v0.11.0` remains the older simulator checkpoint (54/53), not this review version.
 
 ## Run the offline Python suite

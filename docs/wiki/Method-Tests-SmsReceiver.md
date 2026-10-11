@@ -2,7 +2,9 @@
 
 [Index and evidence legend](Home.md) | [BMTC persona](Persona-BMTC-Expenditure.md)
 
-Source: [SmsReceiver.kt](../../android-companion/app/src/main/java/com/abijith/expensetracker/SmsReceiver.kt). Android invokes this BroadcastReceiver for new ordinary SMS. It does not query the inbox. All cases below are **G: proposed**, not implemented assertions. Prior CI measured zero coverage for `onReceive()`.
+Source: [SmsReceiver.kt](../../android-companion/app/src/main/java/com/abijith/expensetracker/SmsReceiver.kt). Android invokes this BroadcastReceiver for new ordinary SMS. It does not query the inbox. The historical component-only CI measured zero coverage for `onReceive()`.
+
+**A: implemented and verified** in [SmsSystemInstrumentedTest](../../android-companion/app/src/androidTest/java/com/abijith/expensetracker/SmsSystemInstrumentedTest.kt): seven real emulated SMS enter this receiver and persist a non-simulated card with the synthetic sender, Python acknowledgement and receiver-to-JSON timing. This verifies single-part granted/enabled reception through the assembled worker/UI flow. See [system-test results](System-Tests-Emulator.md). The broader contracts below remain **G** where not covered—especially multipart decoding, duplicate telephony broadcasts, denied/revoked permissions and asynchronous-error completion.
 
 | Case / method | Project purpose | Arrange / expected assertion |
 | --- | --- | --- |

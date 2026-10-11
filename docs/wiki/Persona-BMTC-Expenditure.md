@@ -6,7 +6,7 @@
 
 A commuter pays Rs.23 to BMTC and receives an ordinary bank SMS. They want the tracker to capture the SMS, identify it as expenditure, suggest `utilities / transport`, and let them confirm or correct that suggestion.
 
-The app sees the **SMS**, not the payment itself. This persona is a documented acceptance test (**M**), not a claim that a complete end-to-end automated test has passed.
+The app sees the **SMS**, not the payment itself. The [emulator system test](System-Tests-Emulator.md) now verifies the synthetic BMTC receiver-to-worker-to-UI happy path with mocked HTTP, including confirmation, recording intent and disk reload. Real carrier delivery and live model accuracy remain **M** checks.
 
 ## Preconditions and safe fixture
 
@@ -51,12 +51,12 @@ flowchart TD
 
 | Case | Action / observation | Expected result | Evidence |
 | --- | --- | --- | --- |
-| P-BMTC-01 | Deliver the synthetic SMS with capture enabled | One retained card with complete body; duplicate broadcast does not add another | M for delivery; A for processor/store duplicate handling |
+| P-BMTC-01 | Deliver the synthetic SMS with capture enabled | One retained card with complete body; duplicate broadcast does not add another | A for emulated single-part delivery and processor/store duplicate handling; repeated telephony broadcast remains G, carrier delivery M |
 | P-BMTC-02 | Inspect local handoff | Python Acknowledged and finite timings; not yet evidence of expenditure | A: PythonBridge and SmsProcessor suites |
-| P-BMTC-03 | Allow background analysis | Waiting then Running when the job runs; no synchronous HTTP in receiver | G for complete receiver/worker wiring; method pages show component evidence |
-| P-BMTC-04 | Supply mocked true, then mocked utilities/transport | Correct key for each stage; category called after expenditure, correct card updated | A: CloudKeys, Category and ClassificationStore suites; full worker orchestration G |
+| P-BMTC-03 | Allow background analysis | Waiting then Running when the job runs; no synchronous HTTP in receiver | A for assembled receiver-to-worker result in SmsSystem; intermediate states/background scheduling guarantees are not asserted |
+| P-BMTC-04 | Supply mocked true, then mocked utilities/transport | Correct key for each stage; category called after expenditure, correct card updated | A: SmsSystem assembled flow plus CloudKeys, Category and ClassificationStore suites |
 | P-BMTC-05 | Intentionally run the live fixture | Expected Expenditure and utilities/transport; record actual result, not assumed success | M, chargeable; not a CI accuracy guarantee |
-| P-BMTC-06 | Press Yes | Confirmed labels saved separately; original suggestion/timings unchanged | A: CategoryReviewUi and CategoryReviewStore suites; actual Activity-to-store wiring G |
+| P-BMTC-06 | Press Yes | Confirmed labels saved separately; original suggestion/timings unchanged | A: SmsSystem actual Activity-to-store confirmation and reload, plus CategoryReviewUi/Store contracts |
 | P-BMTC-07 | On another unreviewed fixture press No, enter custom labels | Both fields required; custom labels persist on the correct message | A: CategoryReviewUi and CategoryReviewStore suites |
 | P-BMTC-08 | Toggle recording on/off; reopen | Choice persists; card and labels retained; initial choice is off/no decision | A: RecordingChoice and CategoryReviewStore suites |
 | P-BMTC-09 | Leave the form unanswered | Suggestion remains unconfirmed; no training/automatic timeout confirmation | M; no automatic finalization exists |

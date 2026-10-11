@@ -8,7 +8,9 @@ For the payment-to-card walkthrough, see [Persona-based testing: BMTC payment of
 
 ## Scope and current verification
 
-Last verified: **October 10, 2026**. The current build is `0.13.0-expenditure-review`. Python tests, debug/release APK builds, and lint passed on Windows. All seventeen Android test classes passed on the Pixel 7a running Android 17 through AndroidJUnitRunner after updating debug app/test APKs without clearing storage. Review controls exist in both variants; the release simulator remains an empty UI/rejecting stub. Isolated Compose tests use an app-themed `ComposeTestActivity` in the debug source set; it is absent from release builds.
+**Latest CI verification:** [run 38162970973](https://github.com/Abijith97/expense-tracker-with-mcp/actions/runs/38162970973), source `bb24dba`, passed with **65 Python tests per Windows/Linux job and 87 Android tests** on API 35. All seven emulator system cases ran (zero skips/failures), with all seven SMS injections confirmed. Android coverage is 91.55% line / 72.51% branch; Python is 99% combined coverage. Debug/test/release builds, lint and APK artifact delivery passed. Completed October 11 UTC / October 12 IST. The following table preserves the older local/device baseline; see [system tests](System-Tests-Emulator.md) for the added executable checks.
+
+Previous local/device baseline: **October 10, 2026**. The current build is `0.13.0-expenditure-review`. Python tests, debug/release APK builds, and lint passed on Windows. All seventeen Android test classes passed on the Pixel 7a running Android 17 through AndroidJUnitRunner after updating debug app/test APKs without clearing storage. Review controls exist in both variants; the release simulator remains an empty UI/rejecting stub. Isolated Compose tests use an app-themed `ComposeTestActivity` in the debug source set; it is absent from release builds.
 
 | Check | Last verified result | What it establishes |
 | --- | --- | --- |

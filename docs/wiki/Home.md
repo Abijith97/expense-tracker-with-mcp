@@ -45,6 +45,8 @@ The Python-flow page documents the production entry points used in the BMTC scen
 
 ## Verified baseline, not a new test run
 
+Latest executable system-test verification: [CI run 38162970973](https://github.com/Abijith97/expense-tracker-with-mcp/actions/runs/38162970973) passed on `bb24dba` with 65 Python checks per platform and 87 Android checks, including all seven emulator SMS scenarios (none skipped). Android coverage: 91.55% line / 72.51% branch. The [system-test guide](System-Tests-Emulator.md) records scope and limitations. The following is the historical component-test baseline, not the current result.
+
 Source baseline: `2426d38`, app `0.13.0-expenditure-review`. [Successful CI run](https://github.com/Abijith97/expense-tracker-with-mcp/actions/runs/38054981327): 56 Python tests on each of Windows/Linux and 80 Android tests on an API 35 emulator. Android JaCoCo: 83.34% line, 65.90% branch coverage. Python coverage.py: 99% combined statement/branch coverage.
 
 The prior report showed **zero coverage for `SmsReceiver.onReceive()` and `SmsClassificationWorker.doWork()`**. Unit/component checks do not prove the full receiver-to-worker flow. Coverage means execution, not correctness or live LLM accuracy. Reports cover Kotlin/Java separately from Python; gcov/lcov are not used.
