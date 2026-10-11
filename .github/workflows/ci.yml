@@ -104,7 +104,9 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -camera-back none
           working-directory: android-companion
-          script: bash ./gradlew -Pcoverage=true :app:createDebugAndroidTestCoverageReport --console=plain
+          # The harness listens for readiness markers before injecting real emulated
+          # SMS. Only test-APK HTTP is mocked; receiver, worker and UI remain real.
+          script: python ci/run_android_system_tests.py --serial emulator-5554 --allow-disposable-emulator-reset --coverage
       - name: Rebuild demo APK without coverage instrumentation
         run: bash ./gradlew :app:assembleDebug --console=plain
       - name: Upload Android reports
@@ -117,6 +119,7 @@ jobs:
             android-companion/app/build/reports/androidTests/
             android-companion/app/build/outputs/androidTest-results/
             android-companion/app/build/reports/lint-results-debug.*
+            android-companion/app/build/reports/system-tests/
           if-no-files-found: warn
           retention-days: 14
       - name: Deliver tested demo APK

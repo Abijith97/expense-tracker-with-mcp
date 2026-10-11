@@ -3,6 +3,7 @@
 - [Home](Home.md)
 - [BMTC payment persona](Persona-BMTC-Expenditure.md)
 - [Running tests, CI and coverage](Testing.md)
+- [Emulator SMS system tests](System-Tests-Emulator.md)
 
 ## Method test plans
 

@@ -28,10 +28,12 @@ The unchanged `v0.11.0` tag identifies the previous SMS-simulator milestone (ver
 
 ## Continuous integration and coverage
 
+The full CI emulator suite now also includes [seven SMS system tests](System-Tests-Emulator.md), plus eight offline harness checks. These cover the real receiver/worker/Python/UI journey with only HTTP replaced. Historical verified totals below remain the prior baseline; use the matching Actions run for the new suite's result.
+
 The workflow has two stages:
 
 1. **Python:** run the existing offline unittest suite with Python 3.11 on both Windows and Linux. `coverage.py` measures the eight production Python modules, including branches. Generate HTML/XML/JSON reports and fail the job below 85% combined coverage.
-2. **Android:** after both Python jobs pass, build debug/test/unsigned-release APKs and run lint on Linux. Start a fresh Android 15 (API 35) x86_64 emulator and run all instrumented JUnit/Compose tests with JaCoCo coverage. The app still compiles/targets API 37; the emulator is one supported runtime, not a replacement for the Pixel's Android 17 checks. Rebuild the debug APK without instrumentation and deliver it as an artifact after all checks pass.
+2. **Android:** after both Python jobs pass, build debug/test/unsigned-release APKs and run lint on Linux. Start a fresh Android 15 (API 35) x86_64 emulator and run all instrumented JUnit/Compose tests through the SMS injection driver with JaCoCo coverage. The app still compiles/targets API 37; the emulator is one supported runtime, not a replacement for the Pixel's Android 17 checks. Rebuild the debug APK without instrumentation and deliver it as an artifact after all checks pass.
 
 No OpenAI keys or real messages are supplied to CI. The optional paid `evaluate_classifier.py` script is excluded. The GitHub runner provides its own emulator; your phone/computer need not be connected or running. Actions usage/artifact storage counts toward the repository owner's GitHub allowance.
 
@@ -116,7 +118,8 @@ The tests enter these stages independently:
 | Shared processor and simulator | Real local Python handoff for both sources; isolated persistence/provenance, stale/permission/pause/clear guards, cloud-off entry point, editable samples, input bounds, and cancelled/confirmed charge prompts. |
 | Category validation, editing and recording intent | Eleven isolated-store checks and six form UI checks cover custom labels, Yes/No, edits/cancellation, persistence, stale editors and separate human/model data. Three switch UI checks cover opt-in/out and failed saving. |
 | Network retries | Seven Android checks cover bounded attempts, backoff, cancellation, permanent errors, stage independence, attempt persistence and unknown total costs after retry. Python checks cover timeout configuration, repayment prompt examples, and deferred retry when a server requests a delay. |
-| Actual SMS delivery and hosted predictions | Manual checks and the explicitly invoked paid evaluation. |
+| Real receiver-to-UI SMS path | Seven emulator system tests inject synthetic telephony SMS and fake HTTP responses/errors; see the [system-test guide](System-Tests-Emulator.md). |
+| Real carrier/device delivery and hosted predictions | Manual checks and the explicitly invoked paid evaluation. |
 
 ## Python unit tests: 56 checks
 

@@ -1,5 +1,7 @@
 # Testing wiki
 
+New: [Emulator SMS happy/failure-path system tests](System-Tests-Emulator.md).
+
 Start with the [BMTC persona](Persona-BMTC-Expenditure.md), then follow the component pages to understand each method's purpose and test contract. [Testing.md](Testing.md) explains runners, commands, CI, reports and the full suite list.
 
 These are versioned Markdown pages in the private repository, with copies in the [GitHub Wiki](https://github.com/Abijith97/expense-tracker-with-mcp/wiki). Its separate Git repository became accessible on October 11, 2026 after the initial Home page was created. Repository privacy and access settings were not changed. Wiki copies use Wiki-page links and absolute source-code links; this folder keeps repository-relative links.

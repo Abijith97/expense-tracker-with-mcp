@@ -15,7 +15,7 @@ cd .\android-companion
 ..\.venv\Scripts\python.exe -m unittest discover -s python-tests -p "test_*.py" -v
 ```
 
-Expected result: `Ran 56 tests` and `OK`. Tests use synthetic inputs and mocked API responses; no phone or OpenAI key is required. New checks cover sanitized credit-card repayment negatives, the 60-second timeout and server-requested retry deferral. They do not establish live model accuracy.
+Expected result: `Ran 64 tests` and `OK` (56 application checks plus 8 system-test harness checks). Tests use synthetic inputs and mocked API responses; no phone or OpenAI key is required. They do not establish live model accuracy.
 
 ## Run the Android checks
 
@@ -26,7 +26,9 @@ $env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'
 .\gradlew.bat :app:connectedDebugAndroidTest
 ```
 
-Expected result: **80 checks** across seventeen classes. This builds/installs development APKs and may restart the app. Tests use isolated synthetic history/settings and stubbed cloud scheduling or inference; they do not send SMS, clear real history, or make paid API calls. Isolated UI tests use the debug-only `ComposeTestActivity`; the real chat screen test uses `MainActivity`.
+Expected result without the system-test harness: **80 checks**, plus 7 skipped emulator-only system cases. This builds/installs development APKs and may restart the app. The existing tests use isolated synthetic history/settings and stubbed cloud scheduling or inference; they do not send SMS, clear real history, or make paid API calls. Isolated UI tests use the debug-only `ComposeTestActivity`; the real chat screen test uses `MainActivity`.
+
+CI uses the [emulator SMS system-test harness](../../docs/wiki/System-Tests-Emulator.md) to run all **87 Android checks**. It injects synthetic SMS through emulated telephony, runs the real receiver/worker/Python/UI flow, and mocks only HTTP in the test APK. It covers BMTC confirmation/recording/persistence, non-expenditure filtering, timeout recovery/exhaustion, malformed output, category authentication failure and uncertainty correction. It requires a disposable emulator and explicit app-data reset acknowledgement; it refuses physical phones or multiple devices. See the guide for local commands and limitations.
 
 New category-review tests under `app/src/androidTest/java/com/abijith/expensetracker/`:
 
