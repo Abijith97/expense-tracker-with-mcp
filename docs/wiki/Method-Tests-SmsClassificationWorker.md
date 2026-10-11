@@ -2,7 +2,7 @@
 
 [Index and evidence legend](Home.md) | [BMTC persona](Persona-BMTC-Expenditure.md)
 
-Source: [SmsClassificationWorker.kt](../../android-companion/app/src/main/java/com/abijith/expensetracker/SmsClassificationWorker.kt). All worker-specific cases below are **G**: proposed, not runnable checks in the current suite. Prior CI measured zero coverage for `doWork()`. Existing [Category](../../android-companion/app/src/androidTest/java/com/abijith/expensetracker/CategoryInstrumentedTest.kt), [InferenceRetry](../../android-companion/app/src/androidTest/java/com/abijith/expensetracker/InferenceRetryInstrumentedTest.kt) and [ClassificationStore](../../android-companion/app/src/androidTest/java/com/abijith/expensetracker/ClassificationStoreInstrumentedTest.kt) test its dependencies, not the assembled job.
+Source: [SmsClassificationWorker.kt](../../android-companion/app/src/main/java/com/abijith/expensetracker/SmsClassificationWorker.kt). The table is the original proposed contract inventory; implemented system-test subsets are identified below it, and the remaining assertions are **G** gaps. Historical component-only CI measured zero coverage for `doWork()`. The newer system tests exercise the assembled job, while [Category](../../android-companion/app/src/androidTest/java/com/abijith/expensetracker/CategoryInstrumentedTest.kt), [InferenceRetry](../../android-companion/app/src/androidTest/java/com/abijith/expensetracker/InferenceRetryInstrumentedTest.kt) and [ClassificationStore](../../android-companion/app/src/androidTest/java/com/abijith/expensetracker/ClassificationStoreInstrumentedTest.kt) provide additional dependency-level evidence.
 
 | Case / method | Project purpose | Arrange / expected assertion |
 | --- | --- | --- |
