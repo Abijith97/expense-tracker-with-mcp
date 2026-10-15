@@ -1,6 +1,12 @@
 # Demo APK installation, updates and signing
 
-The public [README](../../README.md) contains phone install/update instructions. Download the **expense-tracker-demo-apk** artifact from a successful main run, not the internal intermediate APK. GitHub artifact downloads require sign-in; artifacts expire after 14 days. The downloadable APK is a debuggable POC, not a Play Store release.
+The public [README](../../README.md) starts with a direct **Download latest APK** link. It downloads `expense-tracker.apk` from the latest verified demo release: no sign-in or ZIP extraction. Release assets do not have CI artifacts' 14-day expiry. The fallback **expense-tracker-demo-apk** Actions artifact still requires sign-in and ZIP extraction; never install the internal intermediate APK. This is a debuggable POC, not a Play Store release.
+
+## Automated direct download
+
+A separate main-only publication job runs after tests, signing and artifact delivery succeed. Only this job receives `contents: write`; no signing secrets enter it. [publish_demo_apk.py](../../android-companion/ci/publish_demo_apk.py) checks the APK hash and pinned-certificate report, creates a run-specific `android-demo-N` draft, uploads `expense-tracker.apk` and its signing report, verifies the uploaded hashes, then publishes/marks it latest. The README uses GitHub's `/releases/latest/download/expense-tracker.apk` redirect.
+
+Earlier releases/assets are not overwritten. Upload failures leave the draft unpublished and the previous latest download intact; matching partial drafts can resume. Identical reruns are no-ops, and older run numbers cannot replace a newer demo as latest. Publication is serialized. Release notes identify the source commit and successful CI run. The earlier WhatsApp release remains untouched. Eight offline publication tests cover these paths without GitHub writes.
 
 ## Consistent project identity
 

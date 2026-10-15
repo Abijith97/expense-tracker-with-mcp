@@ -32,11 +32,12 @@ The unchanged `v0.11.0` tag identifies the previous SMS-simulator milestone (ver
 
 The full CI emulator suite now also includes [seven SMS system tests](System-Tests-Emulator.md), plus nine offline harness checks. These cover the real receiver/worker/Python/UI journey with only HTTP replaced. Historical verified totals below remain the prior baseline; use the matching Actions run for the new suite's result.
 
-The workflow has three stages:
+The workflow has four stages:
 
 1. **Python:** run the existing offline unittest suite with Python 3.11 on both Windows and Linux. `coverage.py` measures the eight production Python modules, including branches. Generate HTML/XML/JSON reports and fail the job below 85% combined coverage.
 2. **Android:** after both Python jobs pass, build debug/test/unsigned-release APKs and run lint on Linux. Start a fresh Android 15 (API 35) x86_64 emulator and run all instrumented JUnit/Compose tests through the SMS injection driver with JaCoCo coverage. The app still compiles/targets API 37; the emulator is one supported runtime, not a replacement for the Pixel's Android 17 checks. Rebuild without instrumentation and stage an internal APK for the signing job after all checks pass.
 3. **Sign/deliver:** on main push/manual runs only, a separate job downloads the tested intermediate APK, signs it using the dedicated project's main-restricted environment secrets, verifies its pinned certificate and publishes `expense-tracker-demo-apk`. PR tests have no signing secrets. Seven additional offline signing safety checks bring the Python source total to 72; historical CI totals above refer to their specific earlier commits.
+4. **Publish download:** after signing succeeds, a main-only job verifies and uploads the signed APK/report to a run-specific GitHub Release. The README's direct latest-APK link follows the newest published demo. Only publication has repository write permission; failures leave the previous release available. Eight publication checks bring the current offline Python total to 80; Android remains 87. These infrastructure checks are outside the production-Python coverage denominator.
 
 No OpenAI keys or real messages are supplied to CI. The optional paid `evaluate_classifier.py` script is excluded. The GitHub runner provides its own emulator; your phone/computer need not be connected or running. Actions usage/artifact storage counts toward the repository owner's GitHub allowance.
 

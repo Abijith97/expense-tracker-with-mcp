@@ -17,7 +17,7 @@ cd .\android-companion
 ..\.venv\Scripts\python.exe -m unittest discover -s python-tests -p "test_*.py" -v
 ```
 
-Expected result: `Ran 72 tests` and `OK` (56 application checks, 9 system-test harness checks and 7 APK-signing safety checks). Tests use synthetic inputs and mocked API responses; no phone, real signing key or OpenAI key is required. They do not establish live model accuracy. `test_demo_signing.py` covers missing secrets, malformed input, certificate mismatch, multiple signers, sanitized tool errors, temporary-key cleanup and verified output/report publication. See [distribution notes](../../docs/wiki/Demo-APK-Updates.md).
+Expected result: `Ran 80 tests` and `OK` (56 application checks, 9 system-test harness checks, 7 APK-signing safety checks and 8 release-publication checks). Tests use synthetic inputs and mocked responses/tools; no phone, signing/API keys or GitHub writes are required. They do not establish live model accuracy. `test_demo_signing.py` covers fail-closed signing and cleanup; `test_demo_publishing.py` covers hash checks, draft-before-publish, upload failure, interrupted-draft recovery, identical reruns and older-run protection. See [distribution notes](../../docs/wiki/Demo-APK-Updates.md).
 
 ## Run the Android checks
 

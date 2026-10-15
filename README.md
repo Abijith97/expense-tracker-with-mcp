@@ -1,9 +1,13 @@
 # Android AI Expense Tracker
 
+**[Download latest APK](https://github.com/Abijith97/expense-tracker-with-mcp/releases/latest/download/expense-tracker.apk)** · [Build details](https://github.com/Abijith97/expense-tracker-with-mcp/releases/latest)
+
+Direct download for your Android phone. No GitHub sign-in or ZIP extraction needed. This link updates automatically after CI tests and APK verification succeed; a failed build leaves the previous download available.
+
 ## Install on your Android phone
 
-1. Open [GitHub Actions](https://github.com/Abijith97/expense-tracker-with-mcp/actions/workflows/ci.yml) and select the latest successful **main** run of **Tests, coverage and demo APK**. Sign in to GitHub to download artifacts; the repository is public.
-2. Under **Artifacts**, download **expense-tracker-demo-apk**. Extract the ZIP and open **app-debug.apk** on your phone. Do not choose the internal/test APK artifact.
+1. Tap **Download latest APK** above on your phone.
+2. Open the downloaded **expense-tracker.apk**.
 3. If Android prompts you, allow installation from the browser or file manager you are using, then install the app. Only install downloads you trust; Android/device policies may restrict sideloading.
 4. Open the app, enable SMS capture and grant SMS permission. To classify messages, enter your own two distinct OpenAI API keys and enable cloud processing with upload consent. API usage can cost money.
 
@@ -11,11 +15,11 @@ This POC targets compatible 64-bit Android phones running Android 8.0 or later; 
 
 ## Update an installed app
 
-1. After a new **main** CI run succeeds, download **expense-tracker-demo-apk** again.
-2. Extract it, open **app-debug.apk**, and choose **Update**. The APK is used for both installation and updates—there is no separate update file.
+1. Tap **Download latest APK** again whenever you want the newest successful build.
+2. Open **expense-tracker.apk** and choose **Update**. The APK is used for both installation and updates—there is no separate update file.
 3. Reopen the app and check that SMS capture/cloud settings are as intended. Updates are manual, not automatically installed.
 
-Compatible updates keep the app's local history and saved reviews/settings. **Do not uninstall first:** uninstalling removes this app's local data. If an older developer/CI installation reports a package conflict, stop rather than uninstalling to bypass it; see the [developer install/update notes](docs/wiki/Demo-APK-Updates.md). Artifacts expire after 14 days; use a newer successful run when necessary.
+Compatible updates keep the app's local history and saved reviews/settings. **Do not uninstall first:** uninstalling removes this app's local data. If an older developer/CI installation reports a package conflict, stop rather than uninstalling to bypass it; see the [developer install/update notes](docs/wiki/Demo-APK-Updates.md). Release downloads remain available after CI artifacts expire.
 
 ## What the app does
 
