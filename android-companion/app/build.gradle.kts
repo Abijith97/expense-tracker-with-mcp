@@ -14,8 +14,14 @@ android {
         applicationId = "com.abijith.expensetracker"
         minSdk = 26
         targetSdk = 37
-        versionCode = 15
-        versionName = "0.13.0-expenditure-review"
+        // CI distribution builds increase monotonically with this workflow's run
+        // number. Reruns retain the same code; local development keeps its own code.
+        versionCode = providers.gradleProperty("demoBuildNumber").map { raw ->
+            val number = raw.toIntOrNull() ?: error("Invalid demoBuildNumber")
+            require(number in 1..2_099_990_000) { "demoBuildNumber is out of range" }
+            10_000 + number
+        }.getOrElse(16)
+        versionName = "0.14.0-demo"
 
         ndk {
             // Pixel 7a and 64-bit Windows-hosted Android emulators.

@@ -4,6 +4,7 @@
 - [BMTC payment persona](Persona-BMTC-Expenditure.md)
 - [Running tests, CI and coverage](Testing.md)
 - [Emulator SMS system tests](System-Tests-Emulator.md)
+- [Demo APK installation and updates](Demo-APK-Updates.md)
 
 ## Method test plans
 

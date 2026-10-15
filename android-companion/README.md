@@ -1,6 +1,6 @@
 # Android app — category identification and separate API keys
 
-The Android app provides Chat, SMS cards, timing/cost diagnostics, hosted expenditure/category inference, local recording switches and editable category validation. Python runs inside the APK. App version: `0.13.0-expenditure-review` (`versionCode` 15). Debug builds also provide **Simulate SMS** to test without another phone.
+The Android app provides Chat, SMS cards, timing/cost diagnostics, hosted expenditure/category inference, local recording switches and editable category validation. Python runs inside the APK. App version: `0.14.0-demo` (local `versionCode` 16; CI distribution codes increase with the workflow run number). Debug builds also provide **Simulate SMS** to test without another phone. For phone downloads and updates, start with the [main README](../README.md#install-on-your-android-phone).
 
 Chat currently calls the local `app_help.get_help` function for every message, including what the app can do and which finance features are planned. Chat does not yet perform LLM inference, record expenses, or answer spending questions. SMS classification calls `expenditure_classifier.classify_expenditure` directly, which can call OpenAI after you enter two dedicated keys and consent. The app runs without a WhatsApp account, Twilio, ngrok, or a separately hosted application backend.
 

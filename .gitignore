@@ -5,3 +5,8 @@ service-account.json
 logs/
 *.log
 expense_tracker.db
+*.jks
+*.keystore
+*.p12
+*.pfx
+**/signing-backup/
